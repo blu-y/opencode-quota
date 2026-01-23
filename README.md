@@ -12,14 +12,13 @@ Quota and token tracking for OpenCode providers, via Toasts and Commands with no
 
 ![Image of /quota and /quota_daily outputs](https://github.com/slkiser/opencode-quota/blob/main/quota.png)
 
-
 ## Installation
 
 Add to your `opencode.json`:
 
 ```json
 {
-  "plugin": ["opencode-quota"]
+  "plugin": ["@slkiser/opencode-quota"]
 }
 ```
 
@@ -37,7 +36,7 @@ Enable the providers you use:
 }
 ```
 
-That's it. Toasts appear automatically after main agent responses. 
+That's it. Toasts appear automatically after main agent responses.
 
 ## Commands
 
