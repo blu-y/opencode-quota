@@ -53,16 +53,18 @@ That's it. Toasts appear automatically after main agent responses.
 
 | Provider           | Config id            | Notes                                         |
 | ------------------ | -------------------- | --------------------------------------------- |
-| GitHub Copilot     | `copilot`            | Requires PAT setup (see below)                |
+| GitHub Copilot     | `copilot`            | Uses OpenCode auth\*                          |
 | OpenAI (Plus/Pro)  | `openai`             | Uses OpenCode auth                            |
 | Firmware AI        | `firmware`           | Uses OpenCode auth                            |
 | Google Antigravity | `google-antigravity` | Multi-account via `opencode-antigravity-auth` |
 
-### GitHub Copilot Setup
+### GitHub Copilot Setup (optional)
 
-Copilot requires a fine-grained PAT for reliable quota access:
+Copilot works with no extra setup as long as OpenCode already has Copilot configured and logged in.
 
-1. Create a PAT at GitHub with **Account permissions > Plan > Read**
+_Optional:_ if Copilot quota does not show up (or you want more reliable quota reporting), you can provide a fine-grained PAT so the plugin can use GitHub's public billing API:
+
+1. Create a fine-grained PAT at GitHub with **Account permissions > Plan > Read**
 2. Create `~/.config/opencode/copilot-quota-token.json`:
 
 ```json
@@ -74,6 +76,8 @@ Copilot requires a fine-grained PAT for reliable quota access:
 ```
 
 Tier options: `free`, `pro`, `pro+`, `business`, `enterprise`
+
+\* The plugin reads Copilot auth from OpenCode. The PAT file is only a fallback for reliability.
 
 ## Configuration Reference
 
