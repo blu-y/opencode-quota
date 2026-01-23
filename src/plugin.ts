@@ -487,8 +487,13 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
     sessionID: string;
     topModels?: number;
     topSessions?: number;
+    filterSessionID?: string;
   }): Promise<string> {
-    const result = await aggregateUsage({ sinceMs: params.sinceMs, untilMs: params.untilMs });
+    const result = await aggregateUsage({
+      sinceMs: params.sinceMs,
+      untilMs: params.untilMs,
+      sessionID: params.filterSessionID,
+    });
     return formatQuotaStatsReport({
       title: params.title,
       result,
@@ -590,6 +595,14 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
         description:
           "Diagnostics for toast + pricing + local storage (includes unknown pricing report).",
       };
+      cfg.command["quota_today"] = {
+        template: "/quota_today",
+        description: "Token + official API cost summary for today (calendar day, local timezone).",
+      };
+      cfg.command["quota_chat"] = {
+        template: "/quota_chat",
+        description: "Token + official API cost summary for current session only.",
+      };
     },
 
     "command.execute.before": async (input: CommandExecuteInput) => {
@@ -683,6 +696,26 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
               ? (parsed.value["skewMs"] as number)
               : undefined,
           force: parsed.value["force"] === true,
+        });
+        await injectRawOutput(sessionID, out);
+        throw new Error("__QUOTA_COMMAND_HANDLED__");
+      }
+      if (cmd === "quota_today") {
+        // Calendar day in local timezone: midnight to now
+        const now = new Date();
+        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const sinceMs = startOfDay.getTime();
+        const untilMs = now.getTime();
+        const out = await buildQuotaReport({ title: "Quota Today", sinceMs, untilMs, sessionID });
+        await injectRawOutput(sessionID, out);
+        throw new Error("__QUOTA_COMMAND_HANDLED__");
+      }
+      if (cmd === "quota_chat") {
+        const out = await buildQuotaReport({
+          title: "Quota Chat",
+          sessionID,
+          filterSessionID: sessionID,
+          topSessions: 1,
         });
         await injectRawOutput(sessionID, out);
         throw new Error("__QUOTA_COMMAND_HANDLED__");
@@ -786,6 +819,42 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
             force: args.force,
           });
           context.metadata({ title: "Quota Status" });
+          await injectRawOutput(context.sessionID, out);
+          return ""; // Empty return - output already injected with noReply
+        },
+      }),
+
+      quota_today: tool({
+        description: "Token + official API cost summary for today (calendar day, local timezone).",
+        args: {},
+        async execute(_args, context) {
+          const now = new Date();
+          const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          const sinceMs = startOfDay.getTime();
+          const untilMs = now.getTime();
+          const out = await buildQuotaReport({
+            title: "Quota Today",
+            sinceMs,
+            untilMs,
+            sessionID: context.sessionID,
+          });
+          context.metadata({ title: "Quota Today" });
+          await injectRawOutput(context.sessionID, out);
+          return ""; // Empty return - output already injected with noReply
+        },
+      }),
+
+      quota_chat: tool({
+        description: "Token + official API cost summary for current session only.",
+        args: {},
+        async execute(_args, context) {
+          const out = await buildQuotaReport({
+            title: "Quota Chat",
+            sessionID: context.sessionID,
+            filterSessionID: context.sessionID,
+            topSessions: 1,
+          });
+          context.metadata({ title: "Quota Chat" });
           await injectRawOutput(context.sessionID, out);
           return ""; // Empty return - output already injected with noReply
         },

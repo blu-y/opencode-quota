@@ -5,8 +5,12 @@ import {
   pickAntigravityAccountsPath,
   readAntigravityAccounts,
 } from "./google.js";
-import { hasFirmwareApiKeyConfigured } from "./firmware.js";
-import { getPricingSnapshotMeta, listProviders, getProviderModelCount } from "./modelsdev-pricing.js";
+import { getFirmwareKeyDiagnostics } from "./firmware.js";
+import {
+  getPricingSnapshotMeta,
+  listProviders,
+  getProviderModelCount,
+} from "./modelsdev-pricing.js";
 import {
   getOpenCodeMessageDir,
   getOpenCodeSessionDir,
@@ -34,7 +38,12 @@ export async function buildQuotaStatusReport(params: {
   enabledProviders: string[];
   onlyCurrentModel: boolean;
   currentModel?: string;
-  providerAvailability: Array<{ id: string; enabled: boolean; available: boolean; matchesCurrentModel?: boolean }>;
+  providerAvailability: Array<{
+    id: string;
+    enabled: boolean;
+    available: boolean;
+    matchesCurrentModel?: boolean;
+  }>;
   googleRefresh?: {
     attempted: boolean;
     total?: number;
@@ -71,24 +80,41 @@ export async function buildQuotaStatusReport(params: {
   lines.push("");
   lines.push("paths:");
   lines.push(`- auth.json: ${getAuthPath()}`);
-  let firmwareConfigured = false;
+
+  // Firmware API key diagnostics
+  let firmwareDiag: { configured: boolean; source: string | null; checkedPaths: string[] } = {
+    configured: false,
+    source: null,
+    checkedPaths: [],
+  };
   try {
-    firmwareConfigured = await hasFirmwareApiKeyConfigured();
+    firmwareDiag = await getFirmwareKeyDiagnostics();
   } catch {
-    firmwareConfigured = false;
+    // ignore
   }
-  lines.push(`- firmware api key configured: ${firmwareConfigured ? "true" : "false"}`);
+  lines.push(`- firmware api key configured: ${firmwareDiag.configured ? "true" : "false"}`);
+  if (firmwareDiag.source) {
+    lines.push(`- firmware api key source: ${firmwareDiag.source}`);
+  }
+  if (firmwareDiag.checkedPaths.length > 0) {
+    lines.push(`- firmware api key checked: ${firmwareDiag.checkedPaths.join(" | ")}`);
+  }
   lines.push(`- google token cache: ${getGoogleTokenCachePath()}`);
   lines.push(`- antigravity accounts (selected): ${pickAntigravityAccountsPath()}`);
   const candidates = getAntigravityAccountsCandidatePaths();
-  lines.push(`- antigravity accounts (candidates): ${candidates.length ? candidates.join(" | ") : "(none)"}`);
+  lines.push(
+    `- antigravity accounts (candidates): ${candidates.length ? candidates.join(" | ") : "(none)"}`,
+  );
   lines.push(`- opencode storage message: ${getOpenCodeMessageDir()}`);
   lines.push(`- opencode storage session: ${getOpenCodeSessionDir()}`);
 
   if (params.googleRefresh?.attempted) {
     lines.push("");
     lines.push("google_token_refresh:");
-    if (typeof params.googleRefresh.total === "number" && typeof params.googleRefresh.successCount === "number") {
+    if (
+      typeof params.googleRefresh.total === "number" &&
+      typeof params.googleRefresh.successCount === "number"
+    ) {
       lines.push(`- refreshed: ${params.googleRefresh.successCount}/${params.googleRefresh.total}`);
     } else {
       lines.push("- attempted");
@@ -140,7 +166,10 @@ export async function buildQuotaStatusReport(params: {
     );
     for (const row of agg.unknown.slice(0, 25)) {
       const src = `${row.key.sourceProviderID}/${row.key.sourceModelID}`;
-      const mapped = row.key.mappedProvider && row.key.mappedModel ? `${row.key.mappedProvider}/${row.key.mappedModel}` : "(none)";
+      const mapped =
+        row.key.mappedProvider && row.key.mappedModel
+          ? `${row.key.mappedProvider}/${row.key.mappedModel}`
+          : "(none)";
       lines.push(
         `- ${src} mapped=${mapped} tokens=${fmtInt(tokensTotal(row.tokens))} msgs=${fmtInt(row.messageCount)}`,
       );

@@ -1,13 +1,18 @@
 /**
  * Firmware AI quota fetcher
  *
- * Uses OpenCode's auth.json (firmware api key) and queries:
- * https://app.firmware.ai/api/v1/quota
+ * Resolves API key from multiple sources (env vars, opencode.json, auth.json)
+ * and queries: https://app.firmware.ai/api/v1/quota
  */
 
 import type { QuotaError } from "./types.js";
 import { REQUEST_TIMEOUT_MS } from "./types.js";
-import { readAuthFile } from "./opencode-auth.js";
+import {
+  resolveFirmwareApiKey,
+  hasFirmwareApiKey,
+  getFirmwareKeyDiagnostics,
+  type FirmwareKeySource,
+} from "./firmware-config.js";
 
 interface FirmwareQuotaResponse {
   used: number;
@@ -38,13 +43,13 @@ async function fetchWithTimeout(url: string, options: RequestInit): Promise<Resp
 type FirmwareApiAuth = {
   type: "api";
   key: string;
+  source: FirmwareKeySource;
 };
 
 async function readFirmwareAuth(): Promise<FirmwareApiAuth | null> {
-  const auth = await readAuthFile();
-  const fw = auth?.firmware;
-  if (!fw || fw.type !== "api" || !fw.key) return null;
-  return fw as FirmwareApiAuth;
+  const result = await resolveFirmwareApiKey();
+  if (!result) return null;
+  return { type: "api", key: result.key, source: result.source };
 }
 
 export type FirmwareResult =
@@ -59,9 +64,10 @@ export type FirmwareResult =
 const FIRMWARE_QUOTA_URL = "https://app.firmware.ai/api/v1/quota";
 
 export async function hasFirmwareApiKeyConfigured(): Promise<boolean> {
-  const auth = await readFirmwareAuth();
-  return !!auth?.key;
+  return await hasFirmwareApiKey();
 }
+
+export { getFirmwareKeyDiagnostics, type FirmwareKeySource } from "./firmware-config.js";
 
 export async function queryFirmwareQuota(): Promise<FirmwareResult> {
   const auth = await readFirmwareAuth();
@@ -90,7 +96,8 @@ export async function queryFirmwareQuota(): Promise<FirmwareResult> {
     const used = typeof data.used === "number" ? data.used : NaN;
     const percentRemaining = clampPercent(100 - used * 100);
 
-    const resetIso = typeof data.reset === "string" && data.reset.length > 0 ? data.reset : undefined;
+    const resetIso =
+      typeof data.reset === "string" && data.reset.length > 0 ? data.reset : undefined;
 
     return {
       success: true,

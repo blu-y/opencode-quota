@@ -40,14 +40,16 @@ That's it. Toasts appear automatically after main agent responses.
 
 ## Commands
 
-| Command          | Description                          |
-| ---------------- | ------------------------------------ |
-| `/quota`         | Show current quota (verbose)         |
-| `/quota_daily`   | Token + cost report (last 24 hours)  |
-| `/quota_weekly`  | Token + cost report (last 7 days)    |
-| `/quota_monthly` | Token + cost report (last 30 days)   |
-| `/quota_all`     | Token + cost report (all history)    |
-| `/quota_status`  | Diagnostics (config, paths, pricing) |
+| Command          | Description                                 |
+| ---------------- | ------------------------------------------- |
+| `/quota`         | Show current quota (verbose)                |
+| `/quota_today`   | Token + cost report (today, local timezone) |
+| `/quota_daily`   | Token + cost report (last 24 hours)         |
+| `/quota_weekly`  | Token + cost report (last 7 days)           |
+| `/quota_monthly` | Token + cost report (last 30 days)          |
+| `/quota_all`     | Token + cost report (all history)           |
+| `/quota_chat`    | Token + cost report (current session only)  |
+| `/quota_status`  | Diagnostics (config, paths, pricing)        |
 
 ## Supported Providers
 

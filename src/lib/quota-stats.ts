@@ -173,10 +173,7 @@ function mapToOfficialPricingKey(source: {
         return { ok: true, key: { provider: "google", model: "gemini-3-pro-preview" } };
       }
     }
-    if (
-      normalizedModel === "gemini-3-flash" &&
-      lookupCost("google", "gemini-3-flash") == null
-    ) {
+    if (normalizedModel === "gemini-3-flash" && lookupCost("google", "gemini-3-flash") == null) {
       if (lookupCost("google", "gemini-3-flash-preview")) {
         return { ok: true, key: { provider: "google", model: "gemini-3-flash-preview" } };
       }
@@ -215,8 +212,12 @@ function calculateCostUsd(params: {
 export async function aggregateUsage(params: {
   sinceMs?: number;
   untilMs?: number;
+  sessionID?: string;
 }): Promise<AggregateResult> {
-  const messages = await iterAssistantMessages({ sinceMs: params.sinceMs, untilMs: params.untilMs });
+  let messages = await iterAssistantMessages({ sinceMs: params.sinceMs, untilMs: params.untilMs });
+  if (params.sessionID) {
+    messages = messages.filter((m) => m.sessionID === params.sessionID);
+  }
   const sessionsIdx = await readAllSessionsIndex();
 
   const byModel = new Map<string, AggregateRow>();
@@ -246,7 +247,11 @@ export async function aggregateUsage(params: {
       continue;
     }
 
-    const priced = calculateCostUsd({ provider: mapping.key.provider, model: mapping.key.model, tokens });
+    const priced = calculateCostUsd({
+      provider: mapping.key.provider,
+      model: mapping.key.model,
+      tokens,
+    });
     if (!priced.ok) {
       // Mapping succeeded but pricing missing.
       unknownTotals = addBuckets(unknownTotals, tokens);
@@ -342,11 +347,21 @@ export async function aggregateUsage(params: {
   const bySourceProviderRows = Array.from(bySourceProvider.values()).sort(
     (a, b) => b.costUsd - a.costUsd,
   );
-  const bySourceModelRows = Array.from(bySourceModel.values()).sort((a, b) => b.costUsd - a.costUsd);
+  const bySourceModelRows = Array.from(bySourceModel.values()).sort(
+    (a, b) => b.costUsd - a.costUsd,
+  );
   const unknownRows = Array.from(unknown.values()).sort(
     (a, b) =>
-      (b.tokens.input + b.tokens.output + b.tokens.reasoning + b.tokens.cache_read + b.tokens.cache_write) -
-      (a.tokens.input + a.tokens.output + a.tokens.reasoning + a.tokens.cache_read + a.tokens.cache_write),
+      b.tokens.input +
+      b.tokens.output +
+      b.tokens.reasoning +
+      b.tokens.cache_read +
+      b.tokens.cache_write -
+      (a.tokens.input +
+        a.tokens.output +
+        a.tokens.reasoning +
+        a.tokens.cache_read +
+        a.tokens.cache_write),
   );
 
   return {
