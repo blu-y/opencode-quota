@@ -1,6 +1,6 @@
 # opencode-quota
 
-Quota and token tracking for OpenCode providers, via Toasts and Commands with no LLM calls.
+Quota and token tracking for OpenCode providers via Toasts and Commands with no LLM calls.
 
 ## What It Does
 
@@ -8,7 +8,7 @@ Quota and token tracking for OpenCode providers, via Toasts and Commands with no
 
 ![Image of quota toasts](https://github.com/slkiser/opencode-quota/blob/main/toast.png)
 
-**Token Reports** - Track token usage and estimated costs across sessions.
+**Token Report Commands** - Track token usage and estimated costs across sessions.
 
 ![Image of /quota and /quota_daily outputs](https://github.com/slkiser/opencode-quota/blob/main/quota.png)
 
