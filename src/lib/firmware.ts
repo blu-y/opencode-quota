@@ -1,0 +1,106 @@
+/**
+ * Firmware AI quota fetcher
+ *
+ * Uses OpenCode's auth.json (firmware api key) and queries:
+ * https://app.firmware.ai/api/v1/quota
+ */
+
+import type { QuotaError } from "./types.js";
+import { REQUEST_TIMEOUT_MS } from "./types.js";
+import { readAuthFile } from "./opencode-auth.js";
+
+interface FirmwareQuotaResponse {
+  used: number;
+  reset: string | null;
+}
+
+function clampPercent(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+async function fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`Request timeout after ${Math.round(REQUEST_TIMEOUT_MS / 1000)}s`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+type FirmwareApiAuth = {
+  type: "api";
+  key: string;
+};
+
+async function readFirmwareAuth(): Promise<FirmwareApiAuth | null> {
+  const auth = await readAuthFile();
+  const fw = auth?.firmware;
+  if (!fw || fw.type !== "api" || !fw.key) return null;
+  return fw as FirmwareApiAuth;
+}
+
+export type FirmwareResult =
+  | {
+      success: true;
+      percentRemaining: number;
+      resetTimeIso?: string;
+    }
+  | QuotaError
+  | null;
+
+const FIRMWARE_QUOTA_URL = "https://app.firmware.ai/api/v1/quota";
+
+export async function hasFirmwareApiKeyConfigured(): Promise<boolean> {
+  const auth = await readFirmwareAuth();
+  return !!auth?.key;
+}
+
+export async function queryFirmwareQuota(): Promise<FirmwareResult> {
+  const auth = await readFirmwareAuth();
+  if (!auth) return null;
+
+  try {
+    const resp = await fetchWithTimeout(FIRMWARE_QUOTA_URL, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${auth.key}`,
+        "User-Agent": "OpenCode-Quota-Toast/1.0",
+      },
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      return {
+        success: false,
+        error: `Firmware API error ${resp.status}: ${text.slice(0, 120)}`,
+      };
+    }
+
+    const data = (await resp.json()) as FirmwareQuotaResponse;
+
+    // Firmware returns used ratio [0..1]. We convert to remaining %.
+    const used = typeof data.used === "number" ? data.used : NaN;
+    const percentRemaining = clampPercent(100 - used * 100);
+
+    const resetIso = typeof data.reset === "string" && data.reset.length > 0 ? data.reset : undefined;
+
+    return {
+      success: true,
+      percentRemaining,
+      resetTimeIso: resetIso,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}

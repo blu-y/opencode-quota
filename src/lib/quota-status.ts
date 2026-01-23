@@ -1,0 +1,154 @@
+import { getAuthPath } from "./opencode-auth.js";
+import { getGoogleTokenCachePath } from "./google-token-cache.js";
+import {
+  getAntigravityAccountsCandidatePaths,
+  pickAntigravityAccountsPath,
+  readAntigravityAccounts,
+} from "./google.js";
+import { hasFirmwareApiKeyConfigured } from "./firmware.js";
+import { getPricingSnapshotMeta, listProviders, getProviderModelCount } from "./modelsdev-pricing.js";
+import {
+  getOpenCodeMessageDir,
+  getOpenCodeSessionDir,
+  listSessionIDsFromMessageStorage,
+} from "./opencode-storage.js";
+import { aggregateUsage } from "./quota-stats.js";
+
+function fmtInt(n: number): string {
+  return Math.trunc(n).toLocaleString("en-US");
+}
+
+function tokensTotal(t: {
+  input: number;
+  output: number;
+  reasoning: number;
+  cache_read: number;
+  cache_write: number;
+}): number {
+  return t.input + t.output + t.reasoning + t.cache_read + t.cache_write;
+}
+
+export async function buildQuotaStatusReport(params: {
+  configSource: string;
+  configPaths: string[];
+  enabledProviders: string[];
+  onlyCurrentModel: boolean;
+  currentModel?: string;
+  providerAvailability: Array<{ id: string; enabled: boolean; available: boolean; matchesCurrentModel?: boolean }>;
+  googleRefresh?: {
+    attempted: boolean;
+    total?: number;
+    successCount?: number;
+    failures?: Array<{ email?: string; error: string }>;
+  };
+}): Promise<string> {
+  const lines: string[] = [];
+
+  lines.push("Quota Status (opencode-quota)");
+  lines.push("");
+
+  // === toast diagnostics ===
+  lines.push("toast:");
+  lines.push(
+    `- configSource: ${params.configSource}${params.configPaths.length ? ` (${params.configPaths.join(" | ")})` : ""}`,
+  );
+  lines.push(
+    `- enabledProviders: ${params.enabledProviders.length ? params.enabledProviders.join(",") : "(none)"}`,
+  );
+  lines.push(`- onlyCurrentModel: ${params.onlyCurrentModel ? "true" : "false"}`);
+  lines.push(`- currentModel: ${params.currentModel ?? "(unknown)"}`);
+  lines.push("- providers:");
+  for (const p of params.providerAvailability) {
+    const bits: string[] = [];
+    bits.push(p.enabled ? "enabled" : "disabled");
+    bits.push(p.available ? "available" : "unavailable");
+    if (p.matchesCurrentModel !== undefined) {
+      bits.push(`matchesCurrentModel=${p.matchesCurrentModel ? "yes" : "no"}`);
+    }
+    lines.push(`  - ${p.id}: ${bits.join(" ")}`);
+  }
+
+  lines.push("");
+  lines.push("paths:");
+  lines.push(`- auth.json: ${getAuthPath()}`);
+  let firmwareConfigured = false;
+  try {
+    firmwareConfigured = await hasFirmwareApiKeyConfigured();
+  } catch {
+    firmwareConfigured = false;
+  }
+  lines.push(`- firmware api key configured: ${firmwareConfigured ? "true" : "false"}`);
+  lines.push(`- google token cache: ${getGoogleTokenCachePath()}`);
+  lines.push(`- antigravity accounts (selected): ${pickAntigravityAccountsPath()}`);
+  const candidates = getAntigravityAccountsCandidatePaths();
+  lines.push(`- antigravity accounts (candidates): ${candidates.length ? candidates.join(" | ") : "(none)"}`);
+  lines.push(`- opencode storage message: ${getOpenCodeMessageDir()}`);
+  lines.push(`- opencode storage session: ${getOpenCodeSessionDir()}`);
+
+  if (params.googleRefresh?.attempted) {
+    lines.push("");
+    lines.push("google_token_refresh:");
+    if (typeof params.googleRefresh.total === "number" && typeof params.googleRefresh.successCount === "number") {
+      lines.push(`- refreshed: ${params.googleRefresh.successCount}/${params.googleRefresh.total}`);
+    } else {
+      lines.push("- attempted");
+    }
+    for (const f of params.googleRefresh.failures ?? []) {
+      lines.push(`- ${f.email ?? "Unknown"}: ${f.error}`);
+    }
+  }
+
+  let accountCount = 0;
+  try {
+    const accounts = await readAntigravityAccounts();
+    accountCount = accounts?.length ?? 0;
+  } catch {
+    accountCount = 0;
+  }
+  lines.push("");
+  lines.push(`google accounts: count=${accountCount}`);
+
+  // === pricing snapshot ===
+  const meta = getPricingSnapshotMeta();
+  lines.push("");
+  lines.push("pricing_snapshot:");
+  lines.push(`- source: ${meta.source}`);
+  lines.push(`- generatedAt: ${new Date(meta.generatedAt).toISOString()}`);
+  lines.push(`- units: ${meta.units}`);
+  const providers = listProviders();
+  lines.push(`- providers: ${providers.join(",")}`);
+  for (const p of providers) {
+    lines.push(`  - ${p}: models=${fmtInt(getProviderModelCount(p))}`);
+  }
+
+  // === storage scan ===
+  const sessionIDs = await listSessionIDsFromMessageStorage();
+  lines.push("");
+  lines.push("storage:");
+  lines.push(`- sessions_in_message_storage: ${fmtInt(sessionIDs.length)}`);
+
+  // === unknown pricing ===
+  // We intentionally report unknowns for *all time* so users can see what needs mapping.
+  const agg = await aggregateUsage({});
+  lines.push("");
+  lines.push("unknown_pricing:");
+  if (agg.unknown.length === 0) {
+    lines.push("- none");
+  } else {
+    lines.push(
+      `- keys: ${fmtInt(agg.unknown.length)} tokens_total=${fmtInt(tokensTotal(agg.totals.unknown))}`,
+    );
+    for (const row of agg.unknown.slice(0, 25)) {
+      const src = `${row.key.sourceProviderID}/${row.key.sourceModelID}`;
+      const mapped = row.key.mappedProvider && row.key.mappedModel ? `${row.key.mappedProvider}/${row.key.mappedModel}` : "(none)";
+      lines.push(
+        `- ${src} mapped=${mapped} tokens=${fmtInt(tokensTotal(row.tokens))} msgs=${fmtInt(row.messageCount)}`,
+      );
+    }
+    if (agg.unknown.length > 25) {
+      lines.push(`- ... (${fmtInt(agg.unknown.length - 25)} more)`);
+    }
+  }
+
+  return lines.join("\n");
+}

@@ -1,0 +1,67 @@
+{
+  "name": "opencode-quota",
+  "version": "1.0.0",
+  "description": "Show quota status in OpenCode without LLM invocation. Toast + usage reports across providers.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc && node scripts/copy-data.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build",
+    "prepare": "husky"
+  },
+  "keywords": [
+    "opencode",
+    "plugin",
+    "quota",
+    "toast",
+    "github",
+    "copilot",
+    "google",
+    "antigravity",
+    "gemini",
+    "claude"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.1.14",
+    "@types/node": "^22.0.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
+    "prettier": "^3.8.0",
+    "typescript": "^5.8.0",
+    "vitest": "^4.0.17",
+    "zod": "4.1.8"
+  },
+  "dependencies": {
+    "opencode-antigravity-auth": "^1.2.8"
+  },
+  "overrides": {
+    "zod": "4.1.8"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": "^1.1.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

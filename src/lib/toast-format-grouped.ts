@@ -1,0 +1,154 @@
+/**
+ * Grouped toast formatter.
+ *
+ * Renders quota entries grouped by provider/account with compact bars.
+ * Designed to feel like a status dashboard while still respecting OpenCode toast width.
+ */
+
+import type { QuotaToastEntry, QuotaToastError } from "./entries.js";
+
+export type ToastGroupEntry = QuotaToastEntry & {
+  /** Group id (e.g. "OpenAI (Pro)", "Antigravity (abc..gmail)") */
+  group?: string;
+  /** Row label within group (e.g. "Hourly", "Weekly", "Claude") */
+  label?: string;
+  /** Optional right-side suffix (e.g. "94/250") */
+  right?: string;
+};
+
+function clampInt(n: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.trunc(n)));
+}
+
+function padRight(str: string, width: number): string {
+  if (str.length >= width) return str.slice(0, width);
+  return str + " ".repeat(width - str.length);
+}
+
+function padLeft(str: string, width: number): string {
+  if (str.length >= width) return str.slice(str.length - width);
+  return " ".repeat(width - str.length) + str;
+}
+
+function bar(percentRemaining: number, width: number): string {
+  const p = clampInt(percentRemaining, 0, 100);
+  const filled = Math.round((p / 100) * width);
+  const empty = width - filled;
+  return "█".repeat(filled) + "░".repeat(empty);
+}
+
+function formatResetCountdown(iso?: string): string {
+  if (!iso) return "";
+  const resetDate = new Date(iso);
+  const now = new Date();
+  const diffMs = resetDate.getTime() - now.getTime();
+  if (!Number.isFinite(diffMs) || diffMs <= 0) return "reset";
+
+  const diffMinutes = Math.floor(diffMs / 60000);
+  const days = Math.floor(diffMinutes / 1440);
+  const hours = Math.floor((diffMinutes % 1440) / 60);
+  const minutes = diffMinutes % 60;
+
+  if (days > 0) return `${days}d ${hours}h`;
+  return `${hours}h ${minutes}m`;
+}
+
+function splitGroupName(name: string): { group: string; label: string } {
+  // Heuristic: "Label (group)" -> group is label, label is empty.
+  // Prefer explicit group/label metadata when available.
+  return { group: name, label: "" };
+}
+
+export function formatQuotaRowsGrouped(params: {
+  layout?: {
+    maxWidth: number;
+    narrowAt: number;
+    tinyAt: number;
+  };
+  entries?: ToastGroupEntry[];
+  errors?: QuotaToastError[];
+}): string {
+  const layout = params.layout ?? { maxWidth: 50, narrowAt: 42, tinyAt: 32 };
+  const maxWidth = layout.maxWidth;
+  const isTiny = maxWidth <= layout.tinyAt;
+  const isNarrow = !isTiny && maxWidth <= layout.narrowAt;
+
+  const separator = "  ";
+  const percentCol = 4;
+  const barWidth = Math.max(10, maxWidth - separator.length - percentCol);
+  const timeCol = isTiny ? 6 : isNarrow ? 7 : 7;
+
+  const lines: string[] = [];
+
+  // Group entries in stable order.
+  const groupOrder: string[] = [];
+  const groups = new Map<string, ToastGroupEntry[]>();
+  for (const e of params.entries ?? []) {
+    const group = (e.group ?? "").trim();
+    const label = (e.label ?? "").trim();
+    if (!group) {
+      const fallback = splitGroupName(e.name);
+      const g = fallback.group;
+      const list = groups.get(g);
+      if (list) list.push({ ...e, group: g, label: label || fallback.label });
+      else {
+        groupOrder.push(g);
+        groups.set(g, [{ ...e, group: g, label: label || fallback.label }]);
+      }
+      continue;
+    }
+    const list = groups.get(group);
+    if (list) list.push(e);
+    else {
+      groupOrder.push(group);
+      groups.set(group, [e]);
+    }
+  }
+
+  for (let gi = 0; gi < groupOrder.length; gi++) {
+    const g = groupOrder[gi]!;
+    const list = groups.get(g) ?? [];
+    if (gi > 0) lines.push("");
+
+    // Group header like "→ [OpenAI] (Pro)"
+    lines.push(`→ ${g}`.slice(0, maxWidth));
+
+    for (const entry of list) {
+      const label = entry.label?.trim() || entry.name;
+      const timeStr = entry.percentRemaining === 0 ? formatResetCountdown(entry.resetTimeIso) : "";
+      const right = entry.right ? entry.right.trim() : "";
+
+      if (isTiny) {
+        // Tiny: "label  time  XX%" (ignore bar)
+        const tinyNameCol = maxWidth - separator.length - timeCol - separator.length - percentCol;
+        const line = [
+          padRight(label, tinyNameCol),
+          padLeft(timeStr, timeCol),
+          padLeft(`${clampInt(entry.percentRemaining, 0, 100)}%`, percentCol),
+        ].join(separator);
+        lines.push(line.slice(0, maxWidth));
+        continue;
+      }
+
+      // Line 1: label + optional right + time at end
+      const timeWidth = Math.max(timeStr.length, timeCol);
+      const leftMax = Math.max(1, barWidth - separator.length - timeWidth);
+      const leftText = right ? `${label} ${right}` : label;
+      lines.push(
+        (padRight(leftText, leftMax) + separator + padLeft(timeStr, timeWidth)).slice(0, barWidth),
+      );
+
+      // Line 2: bar + percent
+      const barCell = bar(entry.percentRemaining, barWidth);
+      const percentCell = padLeft(`${clampInt(entry.percentRemaining, 0, 100)}%`, percentCol);
+      lines.push([barCell, percentCell].join(separator));
+    }
+  }
+
+  for (const err of params.errors ?? []) {
+    if (lines.length > 0) lines.push("");
+    lines.push(`${err.label}: ${err.message}`);
+  }
+
+  return lines.join("\n");
+}
