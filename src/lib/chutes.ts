@@ -24,6 +24,14 @@ function clampPercent(n: number): number {
   return Math.max(0, Math.min(100, Math.round(n)));
 }
 
+function getNextDailyResetUtc(): string {
+  const now = new Date();
+  const reset = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0, 0),
+  );
+  return reset.toISOString();
+}
+
 async function fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -92,6 +100,7 @@ export async function queryChutesQuota(): Promise<ChutesResult> {
     return {
       success: true,
       percentRemaining,
+      resetTimeIso: getNextDailyResetUtc(),
     };
   } catch (err) {
     return {

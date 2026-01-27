@@ -17,6 +17,8 @@ vi.mock("../src/lib/chutes-config.js", async (importOriginal) => {
 
 describe("queryChutesQuota", () => {
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T12:00:00.000Z"));
     vi.stubGlobal("process", {
       ...process,
       env: { ...process.env },
@@ -24,6 +26,7 @@ describe("queryChutesQuota", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.clearAllMocks();
   });
@@ -57,6 +60,7 @@ describe("queryChutesQuota", () => {
 
     const out = await queryChutesQuota();
     expect(out && out.success ? out.percentRemaining : -1).toBe(75);
+    expect(out && out.success ? out.resetTimeIso : "").toBe("2026-01-02T00:00:00.000Z");
   });
 
   it("handles API errors", async () => {
