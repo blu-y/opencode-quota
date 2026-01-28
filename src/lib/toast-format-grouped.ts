@@ -147,7 +147,9 @@ export function formatQuotaRowsGrouped(params: {
 
     for (const entry of list) {
       const label = entry.label?.trim() || entry.name;
-      const timeStr = entry.percentRemaining === 0 ? formatResetCountdown(entry.resetTimeIso) : "";
+      // Show reset countdown whenever quota is not fully available.
+      // (i.e., any usage at all, or depleted)
+      const timeStr = entry.percentRemaining < 100 ? formatResetCountdown(entry.resetTimeIso) : "";
       const right = entry.right ? entry.right.trim() : "";
 
       if (isTiny) {

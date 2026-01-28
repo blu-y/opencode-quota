@@ -102,8 +102,9 @@ export function formatQuotaRows(params: {
   const lines: string[] = [];
 
   const addEntry = (name: string, resetIso: string | undefined, remaining: number) => {
-    // Only show reset countdown when quota is depleted (0%)
-    const timeStr = remaining === 0 ? formatResetCountdown(resetIso) : "";
+    // Show reset countdown whenever quota is not fully available.
+    // (i.e., any usage at all, or depleted)
+    const timeStr = remaining < 100 ? formatResetCountdown(resetIso) : "";
 
     if (isTiny) {
       // In tiny mode: single line with name + time + percent

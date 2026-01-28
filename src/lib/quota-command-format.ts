@@ -145,6 +145,8 @@ export function formatQuotaCommand(params: {
     const g = groupOrder[i]!;
     const list = groups.get(g) ?? [];
 
+    if (i > 0) lines.push("");
+
     lines.push(`→ ${normalizeGroupHeader(g)}`);
 
     for (const row of list) {

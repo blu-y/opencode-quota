@@ -14,7 +14,7 @@ export interface QuotaToastEntry {
   /** Remaining quota as a percentage [0..100]. */
   percentRemaining: number;
 
-  /** Optional ISO reset timestamp (shown only when percentRemaining is 0). */
+  /** Optional ISO reset timestamp (shown when percentRemaining is < 100). */
   resetTimeIso?: string;
 }
 

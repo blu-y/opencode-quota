@@ -37,4 +37,37 @@ describe("formatQuotaRows", () => {
     expect(out).toContain("Copilot");
     expect(out).not.toContain("█");
   });
+
+  it("shows reset countdown when quota is partially used", () => {
+    const out = formatQuotaRows({
+      version: "1.0.0",
+      layout: { maxWidth: 50, narrowAt: 42, tinyAt: 32 },
+      entries: [
+        {
+          name: "Copilot",
+          percentRemaining: 75,
+          resetTimeIso: "2099-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+
+    // We don't assert exact time math; just that some countdown marker appears.
+    expect(out).toMatch(/(\d+[dhms]|reset)/);
+  });
+
+  it("does not show reset countdown when quota is fully available", () => {
+    const out = formatQuotaRows({
+      version: "1.0.0",
+      layout: { maxWidth: 50, narrowAt: 42, tinyAt: 32 },
+      entries: [
+        {
+          name: "Copilot",
+          percentRemaining: 100,
+          resetTimeIso: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(out).not.toMatch(/\d+[dhms]/);
+  });
 });
