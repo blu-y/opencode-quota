@@ -1,4 +1,4 @@
-# opencode-quota
+# Opencode Quota
 
 Quota and token tracking for OpenCode providers via Toasts and Commands with no LLM calls.
 
