@@ -1043,20 +1043,13 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
 
       // Handle /firmware_reset_window (reset 5-hour spending window)
       if (cmd === "firmware_reset_window") {
+        // Note: Optional JSON args are still parsed for forward compatibility,
+        // but confirmation is no longer required.
         const parsed = parseOptionalJsonArgs(input.arguments);
         if (!parsed.ok) {
           await injectRawOutput(
             sessionID,
             `Invalid arguments for /firmware_reset_window\n\n${parsed.error}`,
-          );
-          throw new Error("__QUOTA_COMMAND_HANDLED__");
-        }
-
-        // Require explicit confirmation to prevent accidental resets
-        if (parsed.value["confirm"] !== true) {
-          await injectRawOutput(
-            sessionID,
-            `⚠️  This will consume 1 of your 2 weekly window resets.\n\nTo confirm, run:\n/firmware_reset_window {"confirm": true}`,
           );
           throw new Error("__QUOTA_COMMAND_HANDLED__");
         }
@@ -1095,76 +1088,6 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
     },
 
     tool: {
-      quota_daily: tool({
-        description: "Token + official API cost summary for the last 24 hours (rolling).",
-        args: {},
-        async execute(_args, context) {
-          const untilMs = Date.now();
-          const sinceMs = untilMs - 24 * 60 * 60 * 1000;
-          const out = await buildQuotaReport({
-            title: "Tokens used (Last 24 Hours) (/tokens_daily)",
-            sinceMs,
-            untilMs,
-            sessionID: context.sessionID,
-          });
-          context.metadata({ title: "Tokens used (Last 24 Hours)" });
-          await injectRawOutput(context.sessionID, out);
-          return ""; // Empty return - output already injected with noReply
-        },
-      }),
-
-      quota_weekly: tool({
-        description: "Token + official API cost summary for the last 7 days (rolling).",
-        args: {},
-        async execute(_args, context) {
-          const untilMs = Date.now();
-          const sinceMs = untilMs - 7 * 24 * 60 * 60 * 1000;
-          const out = await buildQuotaReport({
-            title: "Tokens used (Last 7 Days) (/tokens_weekly)",
-            sinceMs,
-            untilMs,
-            sessionID: context.sessionID,
-          });
-          context.metadata({ title: "Tokens used (Last 7 Days)" });
-          await injectRawOutput(context.sessionID, out);
-          return ""; // Empty return - output already injected with noReply
-        },
-      }),
-
-      quota_monthly: tool({
-        description: "Token + official API cost summary for the last 30 days (rolling).",
-        args: {},
-        async execute(_args, context) {
-          const untilMs = Date.now();
-          const sinceMs = untilMs - 30 * 24 * 60 * 60 * 1000;
-          const out = await buildQuotaReport({
-            title: "Tokens used (Last 30 Days) (/tokens_monthly)",
-            sinceMs,
-            untilMs,
-            sessionID: context.sessionID,
-          });
-          context.metadata({ title: "Tokens used (Last 30 Days)" });
-          await injectRawOutput(context.sessionID, out);
-          return ""; // Empty return - output already injected with noReply
-        },
-      }),
-
-      quota_all: tool({
-        description: "Token + official API cost summary for all locally saved OpenCode history.",
-        args: {},
-        async execute(_args, context) {
-          const out = await buildQuotaReport({
-            title: "Tokens used (All Time) (/tokens_all)",
-            sessionID: context.sessionID,
-            topModels: 12,
-            topSessions: 12,
-          });
-          context.metadata({ title: "Tokens used (All Time)" });
-          await injectRawOutput(context.sessionID, out);
-          return ""; // Empty return - output already injected with noReply
-        },
-      }),
-
       quota_status: tool({
         description:
           "Diagnostics for toast + pricing + local storage (includes unknown pricing report).",
@@ -1196,114 +1119,16 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
         },
       }),
 
-      quota_today: tool({
-        description: "Token + official API cost summary for today (calendar day, local timezone).",
-        args: {},
-        async execute(_args, context) {
-          const now = new Date();
-          const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-          const sinceMs = startOfDay.getTime();
-          const untilMs = now.getTime();
-          const out = await buildQuotaReport({
-            title: "Tokens used (Today) (/tokens_today)",
-            sinceMs,
-            untilMs,
-            sessionID: context.sessionID,
-          });
-          context.metadata({ title: "Tokens used (Today)" });
-          await injectRawOutput(context.sessionID, out);
-          return ""; // Empty return - output already injected with noReply
-        },
-      }),
-
-      quota_session: tool({
-        description: "Token + official API cost summary for current session only.",
-        args: {},
-        async execute(_args, context) {
-          const out = await buildQuotaReport({
-            title: "Tokens used (Current Session) (/tokens_session)",
-            sessionID: context.sessionID,
-            filterSessionID: context.sessionID,
-            sessionOnly: true,
-          });
-          context.metadata({ title: "Tokens used (Current Session)" });
-          await injectRawOutput(context.sessionID, out);
-          return ""; // Empty return - output already injected with noReply
-        },
-      }),
-
-      quota_between: tool({
-        description:
-          "Token + official API cost summary between two YYYY-MM-DD dates (local timezone, inclusive).",
-        args: {
-          startingDate: tool.schema
-            .string()
-            .regex(/^\d{4}-\d{2}-\d{2}$/)
-            .describe("Starting date in YYYY-MM-DD format (local timezone)"),
-          endingDate: tool.schema
-            .string()
-            .regex(/^\d{4}-\d{2}-\d{2}$/)
-            .describe("Ending date in YYYY-MM-DD format (local timezone, inclusive)"),
-        },
-        async execute(args, context) {
-          const startYmd = parseYyyyMmDd(args.startingDate);
-          if (!startYmd) {
-            await injectRawOutput(
-              context.sessionID,
-              `Invalid starting date: "${args.startingDate}". Expected YYYY-MM-DD.`,
-            );
-            return "";
-          }
-          const endYmd = parseYyyyMmDd(args.endingDate);
-          if (!endYmd) {
-            await injectRawOutput(
-              context.sessionID,
-              `Invalid ending date: "${args.endingDate}". Expected YYYY-MM-DD.`,
-            );
-            return "";
-          }
-          const startMs = startOfLocalDayMs(startYmd);
-          const endMs = startOfLocalDayMs(endYmd);
-          if (endMs < startMs) {
-            await injectRawOutput(
-              context.sessionID,
-              `Ending date (${args.endingDate}) is before starting date (${args.startingDate}).`,
-            );
-            return "";
-          }
-          const sinceMs = startMs;
-          const untilMs = startOfNextLocalDayMs(endYmd); // Exclusive upper bound for inclusive end date
-          const startStr = formatYmd(startYmd);
-          const endStr = formatYmd(endYmd);
-          const out = await buildQuotaReport({
-            title: `Tokens used (${startStr} .. ${endStr}) (/tokens_between)`,
-            sinceMs,
-            untilMs,
-            sessionID: context.sessionID,
-          });
-          context.metadata({ title: "Tokens used (Date Range)" });
-          await injectRawOutput(context.sessionID, out);
-          return ""; // Empty return - output already injected with noReply
-        },
-      }),
-
       firmware_reset_window: tool({
         description:
           "Manually reset your Firmware 5-hour spending window. Consumes 1 of 2 weekly resets.",
         args: {
           confirm: tool.schema
             .boolean()
-            .describe("Must be true to proceed with the reset"),
+            .optional()
+            .describe("Deprecated: no longer required"),
         },
-        async execute(args, context) {
-          if (!args.confirm) {
-            await injectRawOutput(
-              context.sessionID,
-              "⚠️  This will consume 1 of your 2 weekly window resets.\n\nPass confirm: true to proceed.",
-            );
-            return "";
-          }
-
+        async execute(_args, context) {
           const result = await resetFirmwareQuotaWindow();
 
           if (!result) {

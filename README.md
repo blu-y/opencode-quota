@@ -118,7 +118,7 @@ Works automatically if OpenCode has Firmware configured. Alternatively, provide 
 
 The `apiKey` field supports `{env:VAR_NAME}` syntax or a direct key.
 
-**Firmware-specific command:** Use `/firmware_reset_window` to manually reset your 5-hour spending window. Run `/firmware_reset_window {"confirm": true}` to confirm.
+**Firmware-specific command:** Use `/firmware_reset_window` to reset your 5-hour spending window (consumes 1 of 2 weekly resets).
 
 </details>
 
