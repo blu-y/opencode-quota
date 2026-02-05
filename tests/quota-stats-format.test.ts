@@ -50,11 +50,11 @@ describe("formatQuotaStatsReport (markdown)", () => {
     });
 
     const out = formatQuotaStatsReport({
-      title: "Quota (/quota_daily)",
+      title: "Tokens used (Last 24 Hours) (/tokens_daily)",
       result: r,
       topModels: 99,
     });
-    expect(out).toContain("# Quota (/quota_daily)");
+    expect(out).toContain("# Tokens used (Last 24 Hours) (/tokens_daily)");
     expect(out).toContain("## Models");
     expect(out).toContain("| Source");
     // blank separator row between sources
@@ -84,7 +84,7 @@ describe("formatQuotaStatsReport (markdown)", () => {
     });
 
     const out = formatQuotaStatsReport({
-      title: "Quota (/quota_daily)",
+      title: "Tokens used (Last 24 Hours) (/tokens_daily)",
       result: r,
       topModels: 99,
     });
@@ -121,13 +121,13 @@ describe("formatQuotaStatsReport (markdown)", () => {
     });
 
     const out = formatQuotaStatsReport({
-      title: "Quota (/quota_session)",
+      title: "Tokens used (Current Session) (/tokens_session)",
       result: r,
       sessionOnly: true,
     });
 
     // Title should be present
-    expect(out).toContain("# Quota (/quota_session)");
+    expect(out).toContain("# Tokens used (Current Session) (/tokens_session)");
 
     // Summary table should NOT have Window or Sessions columns
     expect(out).not.toContain("| Window");
@@ -172,7 +172,7 @@ describe("formatQuotaStatsReport (markdown)", () => {
     });
 
     const out = formatQuotaStatsReport({
-      title: "Quota (/quota_daily)",
+      title: "Tokens used (Last 24 Hours) (/tokens_daily)",
       result: r,
       sessionOnly: false, // explicit false, same as omitting
     });

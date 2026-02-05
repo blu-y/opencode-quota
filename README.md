@@ -10,7 +10,7 @@ Quota and token tracking for OpenCode providers via Toasts and Commands with no 
 
 **Token Report Commands** - Track token usage and estimated costs across sessions.
 
-![Image of /quota and /quota_daily outputs](https://github.com/slkiser/opencode-quota/blob/main/quota.png)
+![Image of /quota and /tokens_daily outputs](https://github.com/slkiser/opencode-quota/blob/main/quota.png)
 
 ## Installation
 
@@ -22,9 +22,7 @@ Add to your `opencode.json`:
 }
 ```
 
-## Quick Start
-
-Enable the providers you use:
+Then enable the providers you use:
 
 ```jsonc
 {
@@ -36,54 +34,70 @@ Enable the providers you use:
 }
 ```
 
-That's it. Toasts appear automatically after main agent responses.
+That's it. Toasts appear automatically after assistant responses.
 
 ## Commands
 
-### Token Reports
-
-| Command           | Title                                                    |
-| ----------------- | -------------------------------------------------------- |
-| `/tokens_today`   | Tokens used (Today) (/tokens_today)                      |
-| `/tokens_daily`   | Tokens used (Last 24 Hours) (/tokens_daily)              |
-| `/tokens_weekly`  | Tokens used (Last 7 Days) (/tokens_weekly)               |
-| `/tokens_monthly` | Tokens used (Last 30 Days) (/tokens_monthly)             |
-| `/tokens_all`     | Tokens used (All Time) (/tokens_all)                     |
-| `/tokens_session` | Tokens used (Current Session) (/tokens_session)          |
-| `/tokens_between` | Tokens used (YYYY-MM-DD .. YYYY-MM-DD) (/tokens_between) |
-
-### Quota Toast & Diagnostics
-
-| Command         | Title                             |
-| --------------- | --------------------------------- |
-| `/quota`        | Quota Toast (Verbose) (/quota)    |
-| `/quota_status` | Quota Diagnostics (/quota_status) |
-
-### Legacy Aliases
-
-The following `/quota_*` commands remain as backwards-compatible aliases:
-
-- `/quota_today` -> `/tokens_today`
-- `/quota_daily` -> `/tokens_daily`
-- `/quota_weekly` -> `/tokens_weekly`
-- `/quota_monthly` -> `/tokens_monthly`
-- `/quota_all` -> `/tokens_all`
-- `/quota_session` -> `/tokens_session`
-- `/quota_between` -> `/tokens_between`
+| Command                  | Description                                    |
+| ------------------------ | ---------------------------------------------- |
+| `/quota`                 | Show quota toast (verbose)                     |
+| `/quota_status`          | Show diagnostics (config, providers, accounts) |
+|                          |                                                |
+| `/tokens_today`          | Tokens used today (calendar day)               |
+| `/tokens_daily`          | Tokens used in last 24 hours                   |
+| `/tokens_weekly`         | Tokens used in last 7 days                     |
+| `/tokens_monthly`        | Tokens used in last 30 days                    |
+| `/tokens_all`            | Tokens used all time                           |
+| `/tokens_session`        | Tokens used in current session                 |
+| `/tokens_between`        | Tokens between two dates (YYYY-MM-DD)          |
+|                          |                                                |
+| `/firmware_reset_window` | Resets Firmware 5-hour spending window         |
 
 ## Supported Providers
 
-| Provider           | Config id            | Notes                                         |
+| Provider           | Config ID            | Auth Source                                   |
 | ------------------ | -------------------- | --------------------------------------------- |
-| GitHub Copilot     | `copilot`            | Uses OpenCode auth\*                          |
-| OpenAI (Plus/Pro)  | `openai`             | Uses OpenCode auth                            |
-| Firmware AI        | `firmware`           | Uses OpenCode auth or API key                 |
-| Chutes AI          | `chutes`             | Uses OpenCode auth or API key                 |
+| GitHub Copilot     | `copilot`            | OpenCode auth (automatic)                     |
+| OpenAI (Plus/Pro)  | `openai`             | OpenCode auth (automatic)                     |
+| Firmware AI        | `firmware`           | OpenCode auth or API key                      |
+| Chutes AI          | `chutes`             | OpenCode auth or API key                      |
 | Google Antigravity | `google-antigravity` | Multi-account via `opencode-antigravity-auth` |
 
-### Firmware AI Setup
+### Provider-Specific Setup
 
-Firmware works automatically if OpenCode has Firmware configured. Alternatively, you can provide an API key in your `opencode.json`:
+<details>
+<summary><strong>GitHub Copilot</strong> (usually no setup needed)</summary>
+
+Copilot works automatically if OpenCode has Copilot configured and logged in.
+
+**Optional:** For more reliable quota reporting, provide a fine-grained PAT:
+
+1. Create a fine-grained PAT at GitHub with **Account permissions > Plan > Read**
+2. Create `~/.config/opencode/copilot-quota-token.json`:
+
+```json
+{
+  "token": "github_pat_...",
+  "username": "your-username",
+  "tier": "pro"
+}
+```
+
+Tier options: `free`, `pro`, `pro+`, `business`, `enterprise`
+
+</details>
+
+<details>
+<summary><strong>OpenAI</strong> (no setup needed)</summary>
+
+OpenAI works automatically if OpenCode has OpenAI/ChatGPT configured.
+
+</details>
+
+<details>
+<summary><strong>Firmware AI</strong></summary>
+
+Works automatically if OpenCode has Firmware configured. Alternatively, provide an API key:
 
 ```jsonc
 {
@@ -102,11 +116,16 @@ Firmware works automatically if OpenCode has Firmware configured. Alternatively,
 }
 ```
 
-The `apiKey` field supports the `{env:VAR_NAME}` syntax to reference environment variables, or you can provide the key directly.
+The `apiKey` field supports `{env:VAR_NAME}` syntax or a direct key.
 
-### Chutes AI Setup
+**Firmware-specific command:** Use `/firmware_reset_window` to manually reset your 5-hour spending window. Run `/firmware_reset_window {"confirm": true}` to confirm.
 
-Chutes works automatically if OpenCode has Chutes configured. Alternatively, you can provide an API key in your `opencode.json`:
+</details>
+
+<details>
+<summary><strong>Chutes AI</strong></summary>
+
+Works automatically if OpenCode has Chutes configured. Alternatively, provide an API key:
 
 ```jsonc
 {
@@ -125,64 +144,140 @@ Chutes works automatically if OpenCode has Chutes configured. Alternatively, you
 }
 ```
 
-### GitHub Copilot Setup (optional)
+</details>
 
-Copilot works with no extra setup as long as OpenCode already has Copilot configured and logged in.
+<details>
+<summary><strong>Google Antigravity</strong></summary>
 
-_Optional:_ if Copilot quota does not show up (or you want more reliable quota reporting), you can provide a fine-grained PAT so the plugin can use GitHub's public billing API:
-
-1. Create a fine-grained PAT at GitHub with **Account permissions > Plan > Read**
-2. Create `~/.config/opencode/copilot-quota-token.json`:
+Requires the `opencode-antigravity-auth` plugin for multi-account support:
 
 ```json
 {
-  "token": "github_pat_...",
-  "username": "your-username",
-  "tier": "pro"
+  "plugin": ["opencode-antigravity-auth", "@slkiser/opencode-quota"]
 }
 ```
 
-Tier options: `free`, `pro`, `pro+`, `business`, `enterprise`
+Account credentials are stored in `~/.config/opencode/antigravity-accounts.json`.
 
-\* The plugin reads Copilot auth from OpenCode. The PAT file is only a fallback for reliability.
+</details>
 
 ## Configuration Reference
 
 All options go under `experimental.quotaToast` in `opencode.json`:
 
-| Option              | Default      | Description                                 |
-| ------------------- | ------------ | ------------------------------------------- |
-| `enabled`           | `true`       | Enable/disable plugin                       |
-| `enableToast`       | `true`       | Show popup toasts                           |
-| `enabledProviders`  | `[]`         | Provider ids to query                       |
-| `minIntervalMs`     | `300000`     | Min ms between fetches (5 min)              |
-| `toastDurationMs`   | `9000`       | Toast display time                          |
-| `onlyCurrentModel`  | `false`      | Only show current model's quota             |
-| `showSessionTokens` | `true`       | Show per-model input/output tokens in toast |
-| `googleModels`      | `["CLAUDE"]` | Google models: `CLAUDE`, `G3PRO`, `G3FLASH` |
-| `debug`             | `false`      | Show debug info in toasts                   |
+| Option              | Default      | Description                                     |
+| ------------------- | ------------ | ----------------------------------------------- |
+| `enabled`           | `true`       | Enable/disable plugin                           |
+| `enableToast`       | `true`       | Show popup toasts                               |
+| `enabledProviders`  | `[]`         | Provider IDs to query (see table above)         |
+| `minIntervalMs`     | `300000`     | Minimum ms between API fetches (default: 5 min) |
+| `toastDurationMs`   | `9000`       | How long toasts display (ms)                    |
+| `onlyCurrentModel`  | `false`      | Only show quota for the current model           |
+| `showSessionTokens` | `true`       | Show per-model input/output tokens in toast     |
+| `googleModels`      | `["CLAUDE"]` | Google models: `CLAUDE`, `G3PRO`, `G3FLASH`     |
+| `debug`             | `false`      | Show debug info in toasts                       |
 
-### Example Configuration
+## Troubleshooting
 
-Here's a complete example `opencode.json` with all common options:
+Toast not appearing? Run `/quota_status` to check config and provider availability.
+
+---
+
+<details>
+<summary><strong>LLM Agent Installation Instructions</strong></summary>
+
+### For LLM Agents: How to Install and Configure
+
+This section provides instructions for LLM agents to install and configure `opencode-quota` based on the user's current OpenCode setup.
+
+#### Step 1: Check Current Configuration
+
+First, determine what providers the user has connected. You can:
+
+1. Read the user's `opencode.json` (typically at `~/.config/opencode/opencode.json`)
+2. Run `/connected` in OpenCode to see active providers
+3. Ask the user which providers they use
+
+#### Step 2: Install the Plugin
+
+Add the plugin to the user's `opencode.json`:
+
+```json
+{
+  "plugin": ["@slkiser/opencode-quota"]
+}
+```
+
+If the user already has plugins, append to the existing array.
+
+#### Step 3: Configure Providers
+
+Based on the user's connected providers, add the appropriate `enabledProviders`:
 
 ```jsonc
 {
-  "plugin": ["@slkiser/opencode-quota"],
   "experimental": {
     "quotaToast": {
-      "enabledProviders": ["copilot", "openai"],
-      "showSessionTokens": true,
-      "minIntervalMs": 300000,
-      "toastDurationMs": 9000,
+      "enabledProviders": [
+        // Add only the providers the user has configured:
+        // "copilot"            - if using GitHub Copilot
+        // "openai"             - if using OpenAI/ChatGPT
+        // "firmware"           - if using Firmware AI
+        // "chutes"             - if using Chutes AI
+        // "google-antigravity" - if using Google Antigravity (requires opencode-antigravity-auth)
+      ],
     },
   },
 }
 ```
 
-## Troubleshooting
+#### Provider Detection Guide
 
-Toast not appearing? Run `/quota_status` to check config and provider availability.
+| If user's config has...                     | Add to enabledProviders |
+| ------------------------------------------- | ----------------------- |
+| `github-copilot` provider or Copilot models | `"copilot"`             |
+| `openai` / `chatgpt` provider               | `"openai"`              |
+| `firmware` / `firmware-ai` provider         | `"firmware"`            |
+| `chutes` provider                           | `"chutes"`              |
+| `google` provider with antigravity models   | `"google-antigravity"`  |
+| `opencode-antigravity-auth` in plugins      | `"google-antigravity"`  |
+
+#### Example: Full Configuration
+
+For a user with Copilot and Google Antigravity:
+
+```jsonc
+{
+  "plugin": [
+    "opencode-antigravity-auth", // Required for google-antigravity
+    "@slkiser/opencode-quota",
+  ],
+  "experimental": {
+    "quotaToast": {
+      "enabledProviders": ["copilot", "google-antigravity"],
+      "googleModels": ["CLAUDE"], // Options: CLAUDE, G3PRO, G3FLASH
+      "minIntervalMs": 300000, // 5 minutes between fetches
+      "toastDurationMs": 9000, // Toast shows for 9 seconds
+    },
+  },
+}
+```
+
+#### Step 4: Verify Installation
+
+After configuration, instruct the user to:
+
+1. Restart OpenCode (or reload the window)
+2. Run `/quota_status` to verify providers are detected
+3. Run `/quota` to manually trigger a toast
+
+#### Common Issues
+
+- **Toast not showing**: Run `/quota_status` to diagnose
+- **Google Antigravity not working**: Ensure `opencode-antigravity-auth` plugin is installed and accounts are configured
+- **Copilot quota unreliable**: Consider setting up a fine-grained PAT (see Provider-Specific Setup above)
+
+</details>
 
 ## License
 

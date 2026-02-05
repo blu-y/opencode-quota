@@ -202,7 +202,7 @@ export function formatQuotaStatsReport(params: {
     lines.push(renderMarkdownTable({ headers, rows, aligns }));
   }
 
-  // Skip Top Sessions for session-only reports (e.g., /quota_session)
+  // Skip Top Sessions for session-only reports (e.g., /tokens_session)
   if (r.bySession.length > 0 && !sessionOnly) {
     lines.push("");
     lines.push(`## Top Sessions`);
@@ -270,7 +270,7 @@ export function formatQuotaStatsReport(params: {
       }),
     );
     lines.push("");
-    lines.push(`Run /tool quota_status to see the full unknown pricing report.`);
+    lines.push(`Run /quota_status to see the full unknown pricing report.`);
   }
 
   return lines.join("\n");

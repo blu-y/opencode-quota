@@ -21,6 +21,7 @@ import type { SessionTokensData } from "./lib/entries.js";
 import { formatQuotaStatsReport } from "./lib/quota-stats-format.js";
 import { buildQuotaStatusReport, type SessionTokenError } from "./lib/quota-status.js";
 import { refreshGoogleTokensForAllAccounts } from "./lib/google.js";
+import { resetFirmwareQuotaWindow } from "./lib/firmware.js";
 
 // =============================================================================
 // Types
@@ -112,7 +113,7 @@ interface PluginConfigInput {
 /** Parsed YYYY-MM-DD date components (module-level for use in command specs) */
 type Ymd = { y: number; m: number; d: number };
 
-/** Token report command IDs (new primary names) */
+/** Token report command IDs */
 type TokenReportCommandId =
   | "tokens_today"
   | "tokens_daily"
@@ -122,23 +123,11 @@ type TokenReportCommandId =
   | "tokens_session"
   | "tokens_between";
 
-/** Legacy command IDs (backwards-compatible aliases) */
-type LegacyTokenCommandId =
-  | "quota_today"
-  | "quota_daily"
-  | "quota_weekly"
-  | "quota_monthly"
-  | "quota_all"
-  | "quota_session"
-  | "quota_between";
-
 /** Specification for a token report command */
 type TokenReportCommandSpec =
   | {
       id: Exclude<TokenReportCommandId, "tokens_between">;
-      legacyId: Exclude<LegacyTokenCommandId, "quota_between">;
       template: `/${string}`;
-      legacyTemplate: `/${string}`;
       description: string;
       title: string;
       metadataTitle: string;
@@ -149,9 +138,7 @@ type TokenReportCommandSpec =
     }
   | {
       id: "tokens_between";
-      legacyId: "quota_between";
       template: "/tokens_between";
-      legacyTemplate: "/quota_between";
       description: string;
       titleForRange: (startYmd: Ymd, endYmd: Ymd) => string;
       metadataTitle: string;
@@ -162,9 +149,7 @@ type TokenReportCommandSpec =
 const TOKEN_REPORT_COMMANDS: readonly TokenReportCommandSpec[] = [
   {
     id: "tokens_today",
-    legacyId: "quota_today",
     template: "/tokens_today",
-    legacyTemplate: "/quota_today",
     description: "Token + official API cost summary for today (calendar day, local timezone).",
     title: "Tokens used (Today) (/tokens_today)",
     metadataTitle: "Tokens used (Today)",
@@ -172,9 +157,7 @@ const TOKEN_REPORT_COMMANDS: readonly TokenReportCommandSpec[] = [
   },
   {
     id: "tokens_daily",
-    legacyId: "quota_daily",
     template: "/tokens_daily",
-    legacyTemplate: "/quota_daily",
     description: "Token + official API cost summary for the last 24 hours (rolling).",
     title: "Tokens used (Last 24 Hours) (/tokens_daily)",
     metadataTitle: "Tokens used (Last 24 Hours)",
@@ -183,9 +166,7 @@ const TOKEN_REPORT_COMMANDS: readonly TokenReportCommandSpec[] = [
   },
   {
     id: "tokens_weekly",
-    legacyId: "quota_weekly",
     template: "/tokens_weekly",
-    legacyTemplate: "/quota_weekly",
     description: "Token + official API cost summary for the last 7 days (rolling).",
     title: "Tokens used (Last 7 Days) (/tokens_weekly)",
     metadataTitle: "Tokens used (Last 7 Days)",
@@ -194,9 +175,7 @@ const TOKEN_REPORT_COMMANDS: readonly TokenReportCommandSpec[] = [
   },
   {
     id: "tokens_monthly",
-    legacyId: "quota_monthly",
     template: "/tokens_monthly",
-    legacyTemplate: "/quota_monthly",
     description: "Token + official API cost summary for the last 30 days (rolling).",
     title: "Tokens used (Last 30 Days) (/tokens_monthly)",
     metadataTitle: "Tokens used (Last 30 Days)",
@@ -205,9 +184,7 @@ const TOKEN_REPORT_COMMANDS: readonly TokenReportCommandSpec[] = [
   },
   {
     id: "tokens_all",
-    legacyId: "quota_all",
     template: "/tokens_all",
-    legacyTemplate: "/quota_all",
     description: "Token + official API cost summary for all locally saved OpenCode history.",
     title: "Tokens used (All Time) (/tokens_all)",
     metadataTitle: "Tokens used (All Time)",
@@ -217,9 +194,7 @@ const TOKEN_REPORT_COMMANDS: readonly TokenReportCommandSpec[] = [
   },
   {
     id: "tokens_session",
-    legacyId: "quota_session",
     template: "/tokens_session",
-    legacyTemplate: "/quota_session",
     description: "Token + official API cost summary for current session only.",
     title: "Tokens used (Current Session) (/tokens_session)",
     metadataTitle: "Tokens used (Current Session)",
@@ -227,9 +202,7 @@ const TOKEN_REPORT_COMMANDS: readonly TokenReportCommandSpec[] = [
   },
   {
     id: "tokens_between",
-    legacyId: "quota_between",
     template: "/tokens_between",
-    legacyTemplate: "/quota_between",
     description: "Token + cost report between two YYYY-MM-DD dates (local timezone, inclusive).",
     titleForRange: (startYmd: Ymd, endYmd: Ymd) => {
       const formatYmd = (ymd: Ymd) => {
@@ -245,19 +218,19 @@ const TOKEN_REPORT_COMMANDS: readonly TokenReportCommandSpec[] = [
   },
 ] as const;
 
-/** Build a lookup map from command ID (both new and legacy) to spec */
-const TOKEN_REPORT_COMMANDS_BY_ID: ReadonlyMap<string, TokenReportCommandSpec> = (() => {
-  const map = new Map<string, TokenReportCommandSpec>();
-  for (const spec of TOKEN_REPORT_COMMANDS) {
-    map.set(spec.id, spec);
-    map.set(spec.legacyId, spec);
-  }
-  return map;
-})();
+/** Build a lookup map from command ID to spec */
+const TOKEN_REPORT_COMMANDS_BY_ID: ReadonlyMap<TokenReportCommandId, TokenReportCommandSpec> =
+  (() => {
+    const map = new Map<TokenReportCommandId, TokenReportCommandSpec>();
+    for (const spec of TOKEN_REPORT_COMMANDS) {
+      map.set(spec.id, spec);
+    }
+    return map;
+  })();
 
 /** Check if a command is a token report command */
-function isTokenReportCommand(cmd: string): cmd is TokenReportCommandId | LegacyTokenCommandId {
-  return TOKEN_REPORT_COMMANDS_BY_ID.has(cmd);
+function isTokenReportCommand(cmd: string): cmd is TokenReportCommandId {
+  return TOKEN_REPORT_COMMANDS_BY_ID.has(cmd as TokenReportCommandId);
 }
 
 // =============================================================================
@@ -917,18 +890,16 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
         description:
           "Diagnostics for toast + pricing + local storage (includes unknown pricing report).",
       };
+      cfg.command["firmware_reset_window"] = {
+        template: "/firmware_reset_window",
+        description: "Manually reset your Firmware 5-hour spending window (consumes 1 of 2 weekly resets).",
+      };
 
-      // Register token report commands (primary /tokens_* and legacy /quota_* aliases)
+      // Register token report commands (/tokens_*)
       for (const spec of TOKEN_REPORT_COMMANDS) {
-        // Primary command (/tokens_*)
         cfg.command[spec.id] = {
           template: spec.template,
           description: spec.description,
-        };
-        // Legacy alias (/quota_*) for backwards compatibility
-        cfg.command[spec.legacyId] = {
-          template: spec.legacyTemplate,
-          description: `${spec.description} (Legacy alias for /${spec.id})`,
         };
       }
     },
@@ -1067,6 +1038,58 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
           force: parsed.value["force"] === true,
         });
         await injectRawOutput(sessionID, out);
+        throw new Error("__QUOTA_COMMAND_HANDLED__");
+      }
+
+      // Handle /firmware_reset_window (reset 5-hour spending window)
+      if (cmd === "firmware_reset_window") {
+        const parsed = parseOptionalJsonArgs(input.arguments);
+        if (!parsed.ok) {
+          await injectRawOutput(
+            sessionID,
+            `Invalid arguments for /firmware_reset_window\n\n${parsed.error}`,
+          );
+          throw new Error("__QUOTA_COMMAND_HANDLED__");
+        }
+
+        // Require explicit confirmation to prevent accidental resets
+        if (parsed.value["confirm"] !== true) {
+          await injectRawOutput(
+            sessionID,
+            `⚠️  This will consume 1 of your 2 weekly window resets.\n\nTo confirm, run:\n/firmware_reset_window {"confirm": true}`,
+          );
+          throw new Error("__QUOTA_COMMAND_HANDLED__");
+        }
+
+        const result = await resetFirmwareQuotaWindow();
+
+        if (!result) {
+          await injectRawOutput(
+            sessionID,
+            "Firmware API key not configured. Cannot reset window.",
+          );
+          throw new Error("__QUOTA_COMMAND_HANDLED__");
+        }
+
+        if (!result.success) {
+          await injectRawOutput(
+            sessionID,
+            `Failed to reset Firmware window:\n${result.error}`,
+          );
+          throw new Error("__QUOTA_COMMAND_HANDLED__");
+        }
+
+        // Build success message
+        const resetsLeft = result.windowResetsRemaining;
+        const resetsMsg = resetsLeft !== undefined
+          ? ` (${resetsLeft} reset${resetsLeft === 1 ? "" : "s"} remaining this week)`
+          : "";
+
+        // Fetch updated quota to show new status
+        const quotaMsg = await fetchQuotaCommandMessage("command:/firmware_reset_window", sessionID);
+        const successOutput = `✓ Firmware 5-hour window reset successful${resetsMsg}${quotaMsg ? `\n\n${quotaMsg}` : ""}`;
+
+        await injectRawOutput(sessionID, successOutput);
         throw new Error("__QUOTA_COMMAND_HANDLED__");
       }
     },
@@ -1260,6 +1283,57 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
           });
           context.metadata({ title: "Tokens used (Date Range)" });
           await injectRawOutput(context.sessionID, out);
+          return ""; // Empty return - output already injected with noReply
+        },
+      }),
+
+      firmware_reset_window: tool({
+        description:
+          "Manually reset your Firmware 5-hour spending window. Consumes 1 of 2 weekly resets.",
+        args: {
+          confirm: tool.schema
+            .boolean()
+            .describe("Must be true to proceed with the reset"),
+        },
+        async execute(args, context) {
+          if (!args.confirm) {
+            await injectRawOutput(
+              context.sessionID,
+              "⚠️  This will consume 1 of your 2 weekly window resets.\n\nPass confirm: true to proceed.",
+            );
+            return "";
+          }
+
+          const result = await resetFirmwareQuotaWindow();
+
+          if (!result) {
+            await injectRawOutput(
+              context.sessionID,
+              "Firmware API key not configured. Cannot reset window.",
+            );
+            return "";
+          }
+
+          if (!result.success) {
+            await injectRawOutput(
+              context.sessionID,
+              `Failed to reset Firmware window:\n${result.error}`,
+            );
+            return "";
+          }
+
+          // Build success message
+          const resetsLeft = result.windowResetsRemaining;
+          const resetsMsg = resetsLeft !== undefined
+            ? ` (${resetsLeft} reset${resetsLeft === 1 ? "" : "s"} remaining this week)`
+            : "";
+
+          // Fetch updated quota to show new status
+          const quotaMsg = await fetchQuotaCommandMessage("tool:firmware_reset_window", context.sessionID);
+          const successOutput = `✓ Firmware 5-hour window reset successful${resetsMsg}${quotaMsg ? `\n\n${quotaMsg}` : ""}`;
+
+          context.metadata({ title: "Firmware Window Reset" });
+          await injectRawOutput(context.sessionID, successOutput);
           return ""; // Empty return - output already injected with noReply
         },
       }),
