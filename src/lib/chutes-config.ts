@@ -8,13 +8,14 @@
  * 3. auth.json: chutes.key (legacy/fallback)
  */
 
-import { existsSync } from "fs";
-import { readFile } from "fs/promises";
-import { homedir } from "os";
-import { join } from "path";
 import { resolveEnvTemplate } from "./env-template.js";
-import { parseJsonOrJsonc } from "./jsonc.js";
 import { readAuthFile } from "./opencode-auth.js";
+import {
+  resolveApiKey,
+  getApiKeyDiagnostics,
+  getOpencodeConfigCandidatePaths,
+  type ApiKeyResult,
+} from "./api-key-resolver.js";
 
 /** Result of Chutes API key resolution */
 export interface ChutesApiKeyResult {
@@ -31,6 +32,8 @@ export type ChutesKeySource =
 
 /**
  * Extract Chutes API key from opencode config object
+ *
+ * Looks for: provider.chutes.options.apiKey
  */
 function extractChutesKeyFromConfig(config: unknown): string | null {
   if (!config || typeof config !== "object") return null;
@@ -52,67 +55,44 @@ function extractChutesKeyFromConfig(config: unknown): string | null {
 }
 
 /**
- * Get candidate paths for opencode.json/opencode.jsonc files
+ * Extract Chutes API key from auth.json
  */
-export function getOpencodeConfigCandidatePaths(): Array<{ path: string; isJsonc: boolean }> {
-  const cwd = process.cwd();
-  const configBaseDir = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
-
-  return [
-    { path: join(cwd, "opencode.jsonc"), isJsonc: true },
-    { path: join(cwd, "opencode.json"), isJsonc: false },
-    { path: join(configBaseDir, "opencode", "opencode.jsonc"), isJsonc: true },
-    { path: join(configBaseDir, "opencode", "opencode.json"), isJsonc: false },
-  ];
-}
-
-/**
- * Read and parse opencode config file
- */
-async function readOpencodeConfig(
-  filePath: string,
-  isJsonc: boolean,
-): Promise<{ config: unknown; path: string; isJsonc: boolean } | null> {
-  try {
-    if (!existsSync(filePath)) return null;
-    const content = await readFile(filePath, "utf-8");
-    const config = parseJsonOrJsonc(content, isJsonc);
-    return { config, path: filePath, isJsonc };
-  } catch {
-    return null;
+function extractChutesKeyFromAuth(auth: unknown): string | null {
+  if (!auth || typeof auth !== "object") return null;
+  const chutes = (auth as Record<string, unknown>).chutes as
+    | { type?: string; key?: string }
+    | undefined;
+  if (chutes && chutes.type === "api" && chutes.key && chutes.key.trim().length > 0) {
+    return chutes.key.trim();
   }
+  return null;
 }
+
+// Re-export for consumers that need path info
+export { getOpencodeConfigCandidatePaths } from "./api-key-resolver.js";
 
 /**
  * Resolve Chutes API key from all available sources.
+ *
+ * Priority (first wins):
+ * 1. Environment variable: CHUTES_API_KEY
+ * 2. opencode.json/opencode.jsonc: provider.chutes.options.apiKey
+ * 3. auth.json: chutes.key
+ *
+ * @returns API key and source, or null if not found
  */
 export async function resolveChutesApiKey(): Promise<ChutesApiKeyResult | null> {
-  const envKey = process.env.CHUTES_API_KEY?.trim();
-  if (envKey && envKey.length > 0) {
-    return { key: envKey, source: "env:CHUTES_API_KEY" };
-  }
-
-  const candidates = getOpencodeConfigCandidatePaths();
-  for (const candidate of candidates) {
-    const result = await readOpencodeConfig(candidate.path, candidate.isJsonc);
-    if (!result) continue;
-
-    const key = extractChutesKeyFromConfig(result.config);
-    if (key) {
-      return {
-        key,
-        source: result.isJsonc ? "opencode.jsonc" : "opencode.json",
-      };
-    }
-  }
-
-  const auth = await readAuthFile();
-  const chutes = auth?.chutes;
-  if (chutes && chutes.type === "api" && chutes.key && chutes.key.trim().length > 0) {
-    return { key: chutes.key.trim(), source: "auth.json" };
-  }
-
-  return null;
+  return resolveApiKey<ChutesKeySource>(
+    {
+      envVars: [{ name: "CHUTES_API_KEY", source: "env:CHUTES_API_KEY" }],
+      extractFromConfig: extractChutesKeyFromConfig,
+      configJsonSource: "opencode.json",
+      configJsoncSource: "opencode.jsonc",
+      extractFromAuth: extractChutesKeyFromAuth,
+      authSource: "auth.json",
+    },
+    readAuthFile,
+  );
 }
 
 /**
@@ -131,24 +111,8 @@ export async function getChutesKeyDiagnostics(): Promise<{
   source: ChutesKeySource | null;
   checkedPaths: string[];
 }> {
-  const checkedPaths: string[] = [];
-
-  if (process.env.CHUTES_API_KEY !== undefined) {
-    checkedPaths.push("env:CHUTES_API_KEY");
-  }
-
-  const candidates = getOpencodeConfigCandidatePaths();
-  for (const candidate of candidates) {
-    if (existsSync(candidate.path)) {
-      checkedPaths.push(candidate.path);
-    }
-  }
-
-  const result = await resolveChutesApiKey();
-
-  return {
-    configured: result !== null,
-    source: result?.source ?? null,
-    checkedPaths,
-  };
+  return getApiKeyDiagnostics<ChutesKeySource>({
+    envVarNames: ["CHUTES_API_KEY"],
+    resolve: resolveChutesApiKey,
+  });
 }

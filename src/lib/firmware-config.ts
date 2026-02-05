@@ -8,13 +8,14 @@
  * 3. auth.json: firmware.key (legacy/fallback)
  */
 
-import { existsSync } from "fs";
-import { readFile } from "fs/promises";
-import { homedir } from "os";
-import { join } from "path";
 import { resolveEnvTemplate } from "./env-template.js";
-import { parseJsonOrJsonc } from "./jsonc.js";
 import { readAuthFile } from "./opencode-auth.js";
+import {
+  resolveApiKey,
+  getApiKeyDiagnostics,
+  getOpencodeConfigCandidatePaths,
+  type ApiKeyResult,
+} from "./api-key-resolver.js";
 
 /** Result of firmware API key resolution */
 export interface FirmwareApiKeyResult {
@@ -56,38 +57,21 @@ function extractFirmwareKeyFromConfig(config: unknown): string | null {
 }
 
 /**
- * Get candidate paths for opencode.json/opencode.jsonc files
+ * Extract firmware API key from auth.json
  */
-export function getOpencodeConfigCandidatePaths(): Array<{ path: string; isJsonc: boolean }> {
-  const cwd = process.cwd();
-  const configBaseDir = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
-
-  // Order: local overrides first, then global fallback
-  // Check both .json and .jsonc variants
-  return [
-    { path: join(cwd, "opencode.jsonc"), isJsonc: true },
-    { path: join(cwd, "opencode.json"), isJsonc: false },
-    { path: join(configBaseDir, "opencode", "opencode.jsonc"), isJsonc: true },
-    { path: join(configBaseDir, "opencode", "opencode.json"), isJsonc: false },
-  ];
-}
-
-/**
- * Read and parse opencode config file
- */
-async function readOpencodeConfig(
-  filePath: string,
-  isJsonc: boolean,
-): Promise<{ config: unknown; path: string; isJsonc: boolean } | null> {
-  try {
-    if (!existsSync(filePath)) return null;
-    const content = await readFile(filePath, "utf-8");
-    const config = parseJsonOrJsonc(content, isJsonc);
-    return { config, path: filePath, isJsonc };
-  } catch {
-    return null;
+function extractFirmwareKeyFromAuth(auth: unknown): string | null {
+  if (!auth || typeof auth !== "object") return null;
+  const fw = (auth as Record<string, unknown>).firmware as
+    | { type?: string; key?: string }
+    | undefined;
+  if (fw && fw.type === "api" && fw.key && fw.key.trim().length > 0) {
+    return fw.key.trim();
   }
+  return null;
 }
+
+// Re-export for consumers that need path info
+export { getOpencodeConfigCandidatePaths } from "./api-key-resolver.js";
 
 /**
  * Resolve Firmware API key from all available sources.
@@ -100,40 +84,20 @@ async function readOpencodeConfig(
  * @returns API key and source, or null if not found
  */
 export async function resolveFirmwareApiKey(): Promise<FirmwareApiKeyResult | null> {
-  // 1. Check environment variables (highest priority)
-  const envKey1 = process.env.FIRMWARE_AI_API_KEY?.trim();
-  if (envKey1 && envKey1.length > 0) {
-    return { key: envKey1, source: "env:FIRMWARE_AI_API_KEY" };
-  }
-
-  const envKey2 = process.env.FIRMWARE_API_KEY?.trim();
-  if (envKey2 && envKey2.length > 0) {
-    return { key: envKey2, source: "env:FIRMWARE_API_KEY" };
-  }
-
-  // 2. Check opencode.json/opencode.jsonc files
-  const candidates = getOpencodeConfigCandidatePaths();
-  for (const candidate of candidates) {
-    const result = await readOpencodeConfig(candidate.path, candidate.isJsonc);
-    if (!result) continue;
-
-    const key = extractFirmwareKeyFromConfig(result.config);
-    if (key) {
-      return {
-        key,
-        source: result.isJsonc ? "opencode.jsonc" : "opencode.json",
-      };
-    }
-  }
-
-  // 3. Fallback to auth.json
-  const auth = await readAuthFile();
-  const fw = auth?.firmware;
-  if (fw && fw.type === "api" && fw.key && fw.key.trim().length > 0) {
-    return { key: fw.key.trim(), source: "auth.json" };
-  }
-
-  return null;
+  return resolveApiKey<FirmwareKeySource>(
+    {
+      envVars: [
+        { name: "FIRMWARE_AI_API_KEY", source: "env:FIRMWARE_AI_API_KEY" },
+        { name: "FIRMWARE_API_KEY", source: "env:FIRMWARE_API_KEY" },
+      ],
+      extractFromConfig: extractFirmwareKeyFromConfig,
+      configJsonSource: "opencode.json",
+      configJsoncSource: "opencode.jsonc",
+      extractFromAuth: extractFirmwareKeyFromAuth,
+      authSource: "auth.json",
+    },
+    readAuthFile,
+  );
 }
 
 /**
@@ -152,29 +116,8 @@ export async function getFirmwareKeyDiagnostics(): Promise<{
   source: FirmwareKeySource | null;
   checkedPaths: string[];
 }> {
-  const checkedPaths: string[] = [];
-
-  // Track env vars checked
-  if (process.env.FIRMWARE_AI_API_KEY !== undefined) {
-    checkedPaths.push("env:FIRMWARE_AI_API_KEY");
-  }
-  if (process.env.FIRMWARE_API_KEY !== undefined) {
-    checkedPaths.push("env:FIRMWARE_API_KEY");
-  }
-
-  // Track config files checked
-  const candidates = getOpencodeConfigCandidatePaths();
-  for (const candidate of candidates) {
-    if (existsSync(candidate.path)) {
-      checkedPaths.push(candidate.path);
-    }
-  }
-
-  const result = await resolveFirmwareApiKey();
-
-  return {
-    configured: result !== null,
-    source: result?.source ?? null,
-    checkedPaths,
-  };
+  return getApiKeyDiagnostics<FirmwareKeySource>({
+    envVarNames: ["FIRMWARE_AI_API_KEY", "FIRMWARE_API_KEY"],
+    resolve: resolveFirmwareApiKey,
+  });
 }
