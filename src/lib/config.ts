@@ -7,6 +7,7 @@
 
 import type { QuotaToastConfig, GoogleModelId } from "./types.js";
 import { DEFAULT_CONFIG } from "./types.js";
+import { stripJsonComments } from "./jsonc.js";
 
 import { existsSync } from "fs";
 import { readFile } from "fs/promises";
@@ -131,60 +132,6 @@ export async function loadConfig(
     }
 
     return config;
-  }
-
-  /**
-   * Strip JSONC comments (// and /* ... *​/) from a string.
-   */
-  function stripJsonComments(content: string): string {
-    let result = "";
-    let i = 0;
-    let inString = false;
-    let stringChar = "";
-
-    while (i < content.length) {
-      const char = content[i];
-      const nextChar = content[i + 1];
-
-      // Handle string boundaries
-      if ((char === '"' || char === "'") && (i === 0 || content[i - 1] !== "\\")) {
-        if (!inString) {
-          inString = true;
-          stringChar = char;
-        } else if (char === stringChar) {
-          inString = false;
-        }
-        result += char;
-        i++;
-        continue;
-      }
-
-      // Skip comments only when not in a string
-      if (!inString) {
-        // Single-line comment
-        if (char === "/" && nextChar === "/") {
-          while (i < content.length && content[i] !== "\n") {
-            i++;
-          }
-          continue;
-        }
-
-        // Multi-line comment
-        if (char === "/" && nextChar === "*") {
-          i += 2;
-          while (i < content.length - 1 && !(content[i] === "*" && content[i + 1] === "/")) {
-            i++;
-          }
-          i += 2;
-          continue;
-        }
-      }
-
-      result += char;
-      i++;
-    }
-
-    return result;
   }
 
   async function readJson(path: string): Promise<unknown | null> {

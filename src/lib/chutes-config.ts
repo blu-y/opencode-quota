@@ -12,6 +12,8 @@ import { existsSync } from "fs";
 import { readFile } from "fs/promises";
 import { homedir } from "os";
 import { join } from "path";
+import { resolveEnvTemplate } from "./env-template.js";
+import { parseJsonOrJsonc } from "./jsonc.js";
 import { readAuthFile } from "./opencode-auth.js";
 
 /** Result of Chutes API key resolution */
@@ -26,76 +28,6 @@ export type ChutesKeySource =
   | "opencode.json"
   | "opencode.jsonc"
   | "auth.json";
-
-/**
- * Strip JSONC comments (// and /* ... *​/) from a string.
- */
-function stripJsonComments(content: string): string {
-  let result = "";
-  let i = 0;
-  let inString = false;
-  let stringChar = "";
-
-  while (i < content.length) {
-    const char = content[i];
-    const nextChar = content[i + 1];
-
-    if ((char === '"' || char === "'") && (i === 0 || content[i - 1] !== "\\")) {
-      if (!inString) {
-        inString = true;
-        stringChar = char;
-      } else if (char === stringChar) {
-        inString = false;
-      }
-      result += char;
-      i++;
-      continue;
-    }
-
-    if (!inString) {
-      if (char === "/" && nextChar === "/") {
-        while (i < content.length && content[i] !== "\n") {
-          i++;
-        }
-        continue;
-      }
-
-      if (char === "/" && nextChar === "*") {
-        i += 2;
-        while (i < content.length - 1 && !(content[i] === "*" && content[i + 1] === "/")) {
-          i++;
-        }
-        i += 2;
-        continue;
-      }
-    }
-
-    result += char;
-    i++;
-  }
-
-  return result;
-}
-
-/**
- * Parse JSON or JSONC content
- */
-function parseJsonOrJsonc(content: string, isJsonc: boolean): unknown {
-  const toParse = isJsonc ? stripJsonComments(content) : content;
-  return JSON.parse(toParse);
-}
-
-/**
- * Resolve {env:VAR_NAME} syntax in a string value
- */
-function resolveEnvTemplate(value: string): string | null {
-  const match = value.match(/^\{env:([^}]+)\}$/);
-  if (!match) return value;
-
-  const envVar = match[1];
-  const envValue = process.env[envVar];
-  return envValue && envValue.trim().length > 0 ? envValue.trim() : null;
-}
 
 /**
  * Extract Chutes API key from opencode config object
