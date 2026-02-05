@@ -40,20 +40,20 @@ That's it. Toasts appear automatically after assistant responses.
 
 ## Commands
 
-| Command                  | Description                                    |
-| ------------------------ | ---------------------------------------------- |
-| `/quota`                 | Show quota toast (verbose)                     |
-| `/quota_status`          | Show diagnostics (config, providers, accounts) |
-|                          |                                                |
-| `/tokens_today`          | Tokens used today (calendar day)               |
-| `/tokens_daily`          | Tokens used in last 24 hours                   |
-| `/tokens_weekly`         | Tokens used in last 7 days                     |
-| `/tokens_monthly`        | Tokens used in last 30 days                    |
-| `/tokens_all`            | Tokens used all time                           |
-| `/tokens_session`        | Tokens used in current session                 |
-| `/tokens_between`        | Tokens between two dates (YYYY-MM-DD)          |
-|                          |                                                |
-| `/firmware_reset_window` | Resets Firmware 5-hour spending window         |
+| Command                  | Description                                      |
+| ------------------------ | ------------------------------------------------ |
+| `/quota`                 | Show quota toast (verbose)                       |
+| `/quota_status`          | Show diagnostics (config, providers, accounts)   |
+|                          |                                                  |
+| `/tokens_today`          | Tokens used today (calendar day)                 |
+| `/tokens_daily`          | Tokens used in last 24 hours                     |
+| `/tokens_weekly`         | Tokens used in last 7 days                       |
+| `/tokens_monthly`        | Tokens used in last 30 days                      |
+| `/tokens_all`            | Tokens used all time                             |
+| `/tokens_session`        | Tokens used in current session                   |
+| `/tokens_between`        | Tokens between two dates (YYYY-MM-DD)            |
+|                          |                                                  |
+| `/firmware_reset_window` | Resets Firmware 5-hour window (requires confirm) |
 
 ## Supported Providers
 
@@ -120,7 +120,7 @@ Works automatically if OpenCode has Firmware configured. Alternatively, provide 
 
 The `apiKey` field supports `{env:VAR_NAME}` syntax or a direct key.
 
-**Firmware-specific command:** Use `/firmware_reset_window` to reset your 5-hour spending window (consumes 1 of 2 weekly resets).
+**Firmware-specific command:** Use `/firmware_reset_window confirm` to reset your 5-hour spending window (consumes 1 of 2 weekly resets). Running without `confirm` shows a warning first.
 
 </details>
 

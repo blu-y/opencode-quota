@@ -19,7 +19,7 @@ interface FirmwareQuotaV1Response {
   windowUsed: number; // 0-1 ratio
   windowReset: string | null;
   weeklyUsed: number; // 0-1 ratio
-  weeklyReset: string;
+  weeklyReset: string | null;
   windowResetsRemaining: number; // 0-2
 }
 
@@ -32,6 +32,16 @@ export interface FirmwareWindowQuota {
 function clampPercent(n: number): number {
   if (!Number.isFinite(n)) return 0;
   return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+/**
+ * Strip control characters (ANSI escapes, etc.) from error text
+ * to prevent terminal injection when displayed in TUI output.
+ */
+function sanitizeErrorText(text: string): string {
+  // Remove ANSI escape sequences and other control characters (except newline/tab)
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]|\x1B\[[0-9;]*[A-Za-z]/g, "");
 }
 
 type FirmwareApiAuth = {
@@ -94,7 +104,7 @@ export async function queryFirmwareQuota(): Promise<FirmwareResult> {
       const text = await resp.text();
       return {
         success: false,
-        error: `Firmware API error ${resp.status}: ${text.slice(0, 120)}`,
+        error: `Firmware API error ${resp.status}: ${sanitizeErrorText(text.slice(0, 120))}`,
       };
     }
 
@@ -116,10 +126,10 @@ export async function queryFirmwareQuota(): Promise<FirmwareResult> {
         ? data.weeklyReset
         : undefined;
 
-    // Parse resets remaining
+    // Parse resets remaining (use trunc to avoid surprising rounding)
     const windowResetsRemaining =
       typeof data.windowResetsRemaining === "number"
-        ? Math.max(0, Math.min(2, Math.round(data.windowResetsRemaining)))
+        ? Math.max(0, Math.min(2, Math.trunc(data.windowResetsRemaining)))
         : 0;
 
     // Back-compat: use worst window for classic display
@@ -183,7 +193,7 @@ export async function resetFirmwareQuotaWindow(): Promise<FirmwareResetWindowRes
         if (errorData.message) {
           return {
             success: false,
-            error: errorData.message,
+            error: sanitizeErrorText(errorData.message),
           };
         }
       } catch {
@@ -191,7 +201,7 @@ export async function resetFirmwareQuotaWindow(): Promise<FirmwareResetWindowRes
       }
       return {
         success: false,
-        error: `Firmware API error ${resp.status}: ${text.slice(0, 120)}`,
+        error: `Firmware API error ${resp.status}: ${sanitizeErrorText(text.slice(0, 120))}`,
       };
     }
 
