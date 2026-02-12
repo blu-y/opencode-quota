@@ -7,6 +7,7 @@
 
 import type { QuotaError } from "./types.js";
 import { fetchWithTimeout } from "./http.js";
+import { clampPercent } from "./format-utils.js";
 import {
   resolveFirmwareApiKey,
   hasFirmwareApiKey,
@@ -27,11 +28,6 @@ interface FirmwareQuotaV1Response {
 export interface FirmwareWindowQuota {
   percentRemaining: number;
   resetTimeIso?: string;
-}
-
-function clampPercent(n: number): number {
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(100, Math.round(n)));
 }
 
 /**

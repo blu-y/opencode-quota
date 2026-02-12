@@ -7,6 +7,7 @@
 
 import type { ChutesResult } from "./types.js";
 import { fetchWithTimeout } from "./http.js";
+import { clampPercent } from "./format-utils.js";
 import {
   resolveChutesApiKey,
   hasChutesApiKey,
@@ -17,11 +18,6 @@ import {
 interface ChutesQuotaResponse {
   quota: number;
   used: number;
-}
-
-function clampPercent(n: number): number {
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(100, Math.round(n)));
 }
 
 function getNextDailyResetUtc(): string {

@@ -8,6 +8,7 @@
 import type { AuthData, QuotaError } from "./types.js";
 import { fetchWithTimeout } from "./http.js";
 import { readAuthFile } from "./opencode-auth.js";
+import { clampPercent } from "./format-utils.js";
 
 interface RateLimitWindow {
   used_percent: number;
@@ -65,11 +66,6 @@ function getEmailFromJwt(token: string): string | null {
 
 function getAccountIdFromJwt(token: string): string | null {
   return parseJwt(token)?.["https://api.openai.com/auth"]?.chatgpt_account_id ?? null;
-}
-
-function clampPercent(n: number): number {
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(100, Math.round(n)));
 }
 
 function remainingPercent(window: RateLimitWindow): number {

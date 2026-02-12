@@ -16,12 +16,22 @@ import { formatQuotaCommand } from "./lib/quota-command-format.js";
 import { getProviders } from "./providers/registry.js";
 import type { QuotaToastEntry, QuotaToastError } from "./lib/entries.js";
 import { tool } from "@opencode-ai/plugin";
-import { aggregateUsage, getSessionTokenSummary, SessionNotFoundError } from "./lib/quota-stats.js";
+import { aggregateUsage } from "./lib/quota-stats.js";
 import type { SessionTokensData } from "./lib/entries.js";
+import { fetchSessionTokensForDisplay } from "./lib/session-tokens.js";
 import { formatQuotaStatsReport } from "./lib/quota-stats-format.js";
 import { buildQuotaStatusReport, type SessionTokenError } from "./lib/quota-status.js";
 import { refreshGoogleTokensForAllAccounts } from "./lib/google.js";
 import { resetFirmwareQuotaWindow } from "./lib/firmware.js";
+import {
+  parseOptionalJsonArgs,
+  parseQuotaBetweenArgs,
+  startOfLocalDayMs,
+  startOfNextLocalDayMs,
+  formatYmd,
+  type Ymd,
+} from "./lib/command-parsing.js";
+import { handled } from "./lib/command-handled.js";
 
 // =============================================================================
 // Types
@@ -110,9 +120,6 @@ interface PluginConfigInput {
 // =============================================================================
 // Token Report Command Specification
 // =============================================================================
-
-/** Parsed YYYY-MM-DD date components (module-level for use in command specs) */
-type Ymd = { y: number; m: number; d: number };
 
 /** Token report command IDs */
 type TokenReportCommandId =
@@ -206,12 +213,6 @@ const TOKEN_REPORT_COMMANDS: readonly TokenReportCommandSpec[] = [
     template: "/tokens_between",
     description: "Token + cost report between two YYYY-MM-DD dates (local timezone, inclusive).",
     titleForRange: (startYmd: Ymd, endYmd: Ymd) => {
-      const formatYmd = (ymd: Ymd) => {
-        const y = String(ymd.y).padStart(4, "0");
-        const m = String(ymd.m).padStart(2, "0");
-        const d = String(ymd.d).padStart(2, "0");
-        return `${y}-${m}-${d}`;
-      };
       return `Tokens used (${formatYmd(startYmd)} .. ${formatYmd(endYmd)}) (/tokens_between)`;
     },
     metadataTitle: "Tokens used (Date Range)",
@@ -316,133 +317,6 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
     })();
 
     return configInFlight;
-  }
-
-  function parseOptionalJsonArgs(input: string | undefined):
-    | {
-        ok: true;
-        value: Record<string, unknown>;
-      }
-    | {
-        ok: false;
-        error: string;
-      } {
-    const raw = input?.trim() || "";
-    if (!raw) return { ok: true, value: {} };
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        return { ok: false, error: 'Arguments must be a JSON object (e.g. {"force":true}).' };
-      }
-      return { ok: true, value: parsed as Record<string, unknown> };
-    } catch {
-      return { ok: false, error: "Failed to parse JSON arguments." };
-    }
-  }
-
-  /**
-   * Parse a YYYY-MM-DD string. Returns null if invalid format or invalid date.
-   */
-  function parseYyyyMmDd(input: string): Ymd | null {
-    const pattern = /^\d{4}-\d{2}-\d{2}$/;
-    if (!pattern.test(input)) return null;
-    const [yStr, mStr, dStr] = input.split("-");
-    const y = parseInt(yStr, 10);
-    const m = parseInt(mStr, 10);
-    const d = parseInt(dStr, 10);
-    // Validate by round-trip: construct a Date and check components match
-    const date = new Date(y, m - 1, d);
-    if (date.getFullYear() !== y || date.getMonth() !== m - 1 || date.getDate() !== d) {
-      return null; // Invalid date (e.g., 2026-02-31)
-    }
-    return { y, m, d };
-  }
-
-  /**
-   * Get the start of a local day (midnight) in milliseconds.
-   */
-  function startOfLocalDayMs(ymd: Ymd): number {
-    return new Date(ymd.y, ymd.m - 1, ymd.d).getTime();
-  }
-
-  /**
-   * Get the start of the next local day (midnight of the following day) in milliseconds.
-   * Used for inclusive end date: untilMs = startOfNextLocalDayMs(end) (exclusive upper bound).
-   */
-  function startOfNextLocalDayMs(ymd: Ymd): number {
-    return new Date(ymd.y, ymd.m - 1, ymd.d + 1).getTime();
-  }
-
-  /**
-   * Parse /tokens_between arguments. Supports:
-   * - Positional: "2026-01-01 2026-01-15"
-   * - JSON: {"starting_date":"2026-01-01","ending_date":"2026-01-15"}
-   */
-  function parseQuotaBetweenArgs(
-    input: string | undefined,
-  ): { ok: true; startYmd: Ymd; endYmd: Ymd } | { ok: false; error: string } {
-    const raw = input?.trim() || "";
-    if (!raw) {
-      return {
-        ok: false,
-        error: "Missing arguments. Expected two dates in YYYY-MM-DD format.",
-      };
-    }
-
-    let startStr: string;
-    let endStr: string;
-
-    if (raw.startsWith("{")) {
-      // JSON format
-      try {
-        const parsed = JSON.parse(raw) as Record<string, unknown>;
-        startStr = String(parsed["starting_date"] ?? parsed["startingDate"] ?? "");
-        endStr = String(parsed["ending_date"] ?? parsed["endingDate"] ?? "");
-      } catch {
-        return { ok: false, error: "Failed to parse JSON arguments." };
-      }
-    } else {
-      // Positional format: split on whitespace
-      const parts = raw.split(/\s+/);
-      if (parts.length !== 2) {
-        return {
-          ok: false,
-          error: "Expected exactly two dates in YYYY-MM-DD format.",
-        };
-      }
-      [startStr, endStr] = parts;
-    }
-
-    const startYmd = parseYyyyMmDd(startStr);
-    if (!startYmd) {
-      return { ok: false, error: `Invalid starting date: "${startStr}". Expected YYYY-MM-DD.` };
-    }
-    const endYmd = parseYyyyMmDd(endStr);
-    if (!endYmd) {
-      return { ok: false, error: `Invalid ending date: "${endStr}". Expected YYYY-MM-DD.` };
-    }
-
-    // Check end >= start
-    const startMs = startOfLocalDayMs(startYmd);
-    const endMs = startOfLocalDayMs(endYmd);
-    if (endMs < startMs) {
-      return {
-        ok: false,
-        error: `Ending date (${endStr}) is before starting date (${startStr}).`,
-      };
-    }
-
-    return { ok: true, startYmd, endYmd };
-  }
-
-  /**
-   * Format a Ymd as YYYY-MM-DD string.
-   */
-  function formatYmd(ymd: Ymd): string {
-    const y = String(ymd.y).padStart(4, "0");
-    const m = String(ymd.m).padStart(2, "0");
-    const d = String(ymd.d).padStart(2, "0");
-    return `${y}-${m}-${d}`;
   }
 
   // Best-effort async init (do not await)
@@ -680,33 +554,13 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
     // Fetch session tokens if enabled and sessionID is available
     let sessionTokens: SessionTokensData | undefined;
     if (config.showSessionTokens && sessionID) {
-      try {
-        const summary = await getSessionTokenSummary(sessionID);
-        if (summary && summary.models.length > 0) {
-          sessionTokens = {
-            models: summary.models,
-            totalInput: summary.totalInput,
-            totalOutput: summary.totalOutput,
-          };
-        }
-        // Clear any previous error on success
-        lastSessionTokenError = undefined;
-      } catch (err) {
-        // Capture error for /quota_status diagnostics
-        if (err instanceof SessionNotFoundError) {
-          lastSessionTokenError = {
-            sessionID: err.sessionID,
-            error: err.message,
-            checkedPath: err.checkedPath,
-          };
-        } else {
-          lastSessionTokenError = {
-            sessionID,
-            error: err instanceof Error ? err.message : String(err),
-          };
-        }
-        // Toast still displays without session tokens
-      }
+      const stResult = await fetchSessionTokensForDisplay({
+        enabled: config.showSessionTokens,
+        sessionID,
+      });
+      sessionTokens = stResult.sessionTokens;
+      // Update diagnostics state: clear on success (no error returned), set on failure
+      lastSessionTokenError = stResult.error;
     }
 
     if (entries.length > 0) {
@@ -853,33 +707,13 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
     // Fetch session tokens if enabled and sessionID is available
     let sessionTokens: SessionTokensData | undefined;
     if (config.showSessionTokens && sessionID) {
-      try {
-        const summary = await getSessionTokenSummary(sessionID);
-        if (summary && summary.models.length > 0) {
-          sessionTokens = {
-            models: summary.models,
-            totalInput: summary.totalInput,
-            totalOutput: summary.totalOutput,
-          };
-        }
-        // Clear any previous error on success
-        lastSessionTokenError = undefined;
-      } catch (err) {
-        // Capture error for /quota_status diagnostics
-        if (err instanceof SessionNotFoundError) {
-          lastSessionTokenError = {
-            sessionID: err.sessionID,
-            error: err.message,
-            checkedPath: err.checkedPath,
-          };
-        } else {
-          lastSessionTokenError = {
-            sessionID,
-            error: err instanceof Error ? err.message : String(err),
-          };
-        }
-        // Command still returns without session tokens
-      }
+      const stResult = await fetchSessionTokensForDisplay({
+        enabled: config.showSessionTokens,
+        sessionID,
+      });
+      sessionTokens = stResult.sessionTokens;
+      // Update diagnostics state: clear on success (no error returned), set on failure
+      lastSessionTokenError = stResult.error;
     }
 
     return formatQuotaCommand({ entries, errors, sessionTokens });
@@ -1080,11 +914,11 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
               );
             }
           }
-          throw new Error("__QUOTA_COMMAND_HANDLED__");
+          handled();
         }
 
         await injectRawOutput(sessionID, msg);
-        throw new Error("__QUOTA_COMMAND_HANDLED__");
+        handled();
       }
 
       const untilMs = Date.now();
@@ -1101,7 +935,7 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
               sessionID,
               `Invalid arguments for /${spec.id}\n\n${parsed.error}\n\nExpected: /${spec.id} YYYY-MM-DD YYYY-MM-DD\nExample: /${spec.id} 2026-01-01 2026-01-15`,
             );
-            throw new Error("__QUOTA_COMMAND_HANDLED__");
+            handled();
           }
           const sinceMs = startOfLocalDayMs(parsed.startYmd);
           const rangeUntilMs = startOfNextLocalDayMs(parsed.endYmd); // Exclusive upper bound for inclusive end date
@@ -1112,7 +946,7 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
             sessionID,
           });
           await injectRawOutput(sessionID, out);
-          throw new Error("__QUOTA_COMMAND_HANDLED__");
+          handled();
         }
 
         // Non-between token report commands
@@ -1153,7 +987,7 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
           topSessions,
         });
         await injectRawOutput(sessionID, out);
-        throw new Error("__QUOTA_COMMAND_HANDLED__");
+        handled();
       }
 
       // Handle /quota_status (diagnostics - not a token report)
@@ -1164,7 +998,7 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
             sessionID,
             `Invalid arguments for /quota_status\n\n${parsed.error}\n\nExample:\n/quota_status {"refreshGoogleTokens": true}`,
           );
-          throw new Error("__QUOTA_COMMAND_HANDLED__");
+          handled();
         }
 
         const out = await buildStatusReport({
@@ -1177,7 +1011,7 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
           sessionID,
         });
         await injectRawOutput(sessionID, out);
-        throw new Error("__QUOTA_COMMAND_HANDLED__");
+        handled();
       }
 
       // Handle /firmware_reset_window (reset 5-hour spending window)
@@ -1197,7 +1031,7 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
               sessionID,
               `Invalid JSON arguments for /firmware_reset_window\n\nTo proceed, run:\n/firmware_reset_window confirm`,
             );
-            throw new Error("__QUOTA_COMMAND_HANDLED__");
+            handled();
           }
         }
 
@@ -1207,19 +1041,19 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
             sessionID,
             `⚠️ This will reset your Firmware 5-hour spending window.\nYou have a maximum of 2 resets per week.\n\nTo proceed, run:\n/firmware_reset_window confirm`,
           );
-          throw new Error("__QUOTA_COMMAND_HANDLED__");
+          handled();
         }
 
         const result = await resetFirmwareQuotaWindow();
 
         if (!result) {
           await injectRawOutput(sessionID, "Firmware API key not configured. Cannot reset window.");
-          throw new Error("__QUOTA_COMMAND_HANDLED__");
+          handled();
         }
 
         if (!result.success) {
           await injectRawOutput(sessionID, `Failed to reset Firmware window:\n${result.error}`);
-          throw new Error("__QUOTA_COMMAND_HANDLED__");
+          handled();
         }
 
         // Build success message
@@ -1237,7 +1071,7 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
         const successOutput = `✓ Firmware 5-hour window reset successful${resetsMsg}${quotaMsg ? `\n\n${quotaMsg}` : ""}`;
 
         await injectRawOutput(sessionID, successOutput);
-        throw new Error("__QUOTA_COMMAND_HANDLED__");
+        handled();
       }
     },
 

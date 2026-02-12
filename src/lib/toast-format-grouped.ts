@@ -6,15 +6,8 @@
  */
 
 import type { QuotaToastEntry, QuotaToastError, SessionTokensData } from "./entries.js";
-import {
-  bar,
-  clampInt,
-  formatResetCountdown,
-  formatTokenCount,
-  padLeft,
-  padRight,
-  shortenModelName,
-} from "./format-utils.js";
+import { bar, clampInt, formatResetCountdown, padLeft, padRight } from "./format-utils.js";
+import { renderSessionTokensLines } from "./session-tokens-format.js";
 
 export type ToastGroupEntry = QuotaToastEntry & {
   /** Group id (e.g. "OpenAI (Pro)", "Antigravity (abc..gmail)") */
@@ -126,19 +119,10 @@ export function formatQuotaRowsGrouped(params: {
   }
 
   // Add session token summary (if data available and non-empty)
-  if (params.sessionTokens && params.sessionTokens.models.length > 0) {
+  const tokenLines = renderSessionTokensLines(params.sessionTokens);
+  if (tokenLines.length > 0) {
     if (lines.length > 0) lines.push("");
-    lines.push("Session Tokens");
-
-    for (const model of params.sessionTokens.models) {
-      // Shorten model name for compact display
-      const shortName = shortenModelName(model.modelID, 20);
-      const inStr = formatTokenCount(model.input);
-      const outStr = formatTokenCount(model.output);
-      lines.push(
-        `  ${padRight(shortName, 20)}  ${padLeft(inStr, 6)} in  ${padLeft(outStr, 6)} out`,
-      );
-    }
+    lines.push(...tokenLines);
   }
 
   return lines.join("\n");

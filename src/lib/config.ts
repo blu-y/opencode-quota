@@ -7,7 +7,7 @@
 
 import type { QuotaToastConfig, GoogleModelId } from "./types.js";
 import { DEFAULT_CONFIG } from "./types.js";
-import { stripJsonComments } from "./jsonc.js";
+import { parseJsonOrJsonc } from "./jsonc.js";
 
 import { existsSync } from "fs";
 import { readFile } from "fs/promises";
@@ -169,10 +169,7 @@ export async function loadConfig(
   async function readJson(path: string): Promise<unknown | null> {
     try {
       const content = await readFile(path, "utf-8");
-      // Support JSONC (JSON with comments) for .jsonc files
-      const isJsonc = path.endsWith(".jsonc");
-      const toParse = isJsonc ? stripJsonComments(content) : content;
-      return JSON.parse(toParse) as unknown;
+      return parseJsonOrJsonc(content, path.endsWith(".jsonc"));
     } catch {
       return null;
     }
@@ -183,37 +180,36 @@ export async function loadConfig(
     const configBaseDir = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
 
     // Order: global first, then local overrides.
-    // Check both .jsonc and .json variants (jsonc takes precedence within each location).
-    const candidates = [
-      join(configBaseDir, "opencode", "opencode.jsonc"),
-      join(configBaseDir, "opencode", "opencode.json"),
-      join(cwd, "opencode.jsonc"),
-      join(cwd, "opencode.json"),
-    ];
+    // Within each location, load .json first, then .jsonc so that
+    // .jsonc takes precedence on key collisions (matching the documented intent).
+    const locations = [join(configBaseDir, "opencode"), cwd];
 
     const quota: Partial<QuotaToastConfig> = {};
     const usedPaths: string[] = [];
 
-    for (const p of candidates) {
-      if (!existsSync(p)) continue;
-      const parsed = await readJson(p);
-      if (!parsed || typeof parsed !== "object") continue;
+    for (const dir of locations) {
+      for (const filename of ["opencode.json", "opencode.jsonc"]) {
+        const p = join(dir, filename);
+        if (!existsSync(p)) continue;
+        const parsed = await readJson(p);
+        if (!parsed || typeof parsed !== "object") continue;
 
-      const root = parsed as any;
+        const root = parsed as any;
 
-      const picks: Array<{ key: string; value: unknown }> = [
-        { key: "experimental.quotaToast", value: root?.experimental?.quotaToast },
-      ];
+        const picks: Array<{ key: string; value: unknown }> = [
+          { key: "experimental.quotaToast", value: root?.experimental?.quotaToast },
+        ];
 
-      const usedKeys: string[] = [];
-      for (const pick of picks) {
-        if (!pick.value || typeof pick.value !== "object") continue;
-        Object.assign(quota, pick.value);
-        usedKeys.push(pick.key);
-      }
+        const usedKeys: string[] = [];
+        for (const pick of picks) {
+          if (!pick.value || typeof pick.value !== "object") continue;
+          Object.assign(quota, pick.value);
+          usedKeys.push(pick.key);
+        }
 
-      if (usedKeys.length > 0) {
-        usedPaths.push(`${p} (${usedKeys.join(", ")})`);
+        if (usedKeys.length > 0) {
+          usedPaths.push(`${p} (${usedKeys.join(", ")})`);
+        }
       }
     }
 

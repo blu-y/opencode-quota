@@ -15,6 +15,15 @@ export function clampInt(n: number, min: number, max: number): number {
 }
 
 /**
+ * Clamp a value to a percentage [0..100], rounding to the nearest integer.
+ * Returns 0 for non-finite inputs.
+ */
+export function clampPercent(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+/**
  * Pad string to width, truncating if too long, adding spaces on right if too short.
  */
 export function padRight(str: string, width: number): string {
