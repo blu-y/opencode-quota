@@ -10,7 +10,9 @@ import {
   getPricingSnapshotMeta,
   listProviders,
   getProviderModelCount,
+  hasProvider as snapshotHasProvider,
 } from "./modelsdev-pricing.js";
+import { getProviders } from "../providers/registry.js";
 import { getPackageVersion } from "./version.js";
 import {
   getOpenCodeDbPath,
@@ -49,6 +51,102 @@ function tokensTotal(t: {
   return t.input + t.output + t.reasoning + t.cache_read + t.cache_write;
 }
 
+type PricingCoverageByProvider = {
+  pricedKeysSeen: number;
+  mappedMissingKeysSeen: number;
+};
+
+function computePricingCoverageFromAgg(agg: Awaited<ReturnType<typeof aggregateUsage>>): {
+  byProvider: Map<string, PricingCoverageByProvider>;
+  totals: { pricedKeysSeen: number; mappedMissingKeysSeen: number };
+} {
+  const byProvider = new Map<string, PricingCoverageByProvider>();
+  let pricedKeysSeen = 0;
+  let mappedMissingKeysSeen = 0;
+
+  // Priced keys seen in history
+  for (const row of agg.byModel) {
+    const p = row.key.provider;
+    const existing = byProvider.get(p) ?? { pricedKeysSeen: 0, mappedMissingKeysSeen: 0 };
+    existing.pricedKeysSeen += 1;
+    byProvider.set(p, existing);
+    pricedKeysSeen += 1;
+  }
+
+  // Keys that mapped to an official provider/model but were missing pricing
+  for (const row of agg.unknown) {
+    const p = row.key.mappedProvider;
+    if (!p || !row.key.mappedModel) continue;
+    const existing = byProvider.get(p) ?? { pricedKeysSeen: 0, mappedMissingKeysSeen: 0 };
+    existing.mappedMissingKeysSeen += 1;
+    byProvider.set(p, existing);
+    mappedMissingKeysSeen += 1;
+  }
+
+  return { byProvider, totals: { pricedKeysSeen, mappedMissingKeysSeen } };
+}
+
+function supportedProviderPricingRow(params: {
+  id: string;
+  agg: Awaited<ReturnType<typeof aggregateUsage>>;
+  snapshotProviders: string[];
+}): { id: string; pricing: "yes" | "partial" | "no"; notes: string } {
+  const id = params.id;
+
+  if (id === "firmware") {
+    return {
+      id,
+      pricing: "no",
+      notes: "credits-based quota (not token-priced)",
+    };
+  }
+
+  // Providers that correspond directly to models.dev providers.
+  if (params.snapshotProviders.includes(id)) {
+    return { id, pricing: "yes", notes: "models.dev snapshot provider" };
+  }
+
+  // Connector to snapshot provider; treat as priced if snapshot has OpenAI pricing.
+  // Copilot is an OpenCode provider but token costs still map into official model pricing.
+  if (id === "copilot") {
+    return snapshotHasProvider("openai")
+      ? { id, pricing: "yes", notes: "connector (priced via models.dev openai)" }
+      : { id, pricing: "partial", notes: "connector (pricing snapshot missing openai)" };
+  }
+
+  // Connector provider; maps to models.dev provider ids depending on model.
+  if (id === "google-antigravity") {
+    return snapshotHasProvider("google") || snapshotHasProvider("anthropic")
+      ? { id, pricing: "yes", notes: "connector (priced via models.dev google/anthropic)" }
+      : { id, pricing: "partial", notes: "connector (pricing snapshot missing google/anthropic)" };
+  }
+
+  // Connector providers: pricing exists when model IDs can be mapped into snapshot pricing keys.
+  // Use local history as the source of truth.
+  const hasAnyUsage = params.agg.bySourceProvider.some((p) => p.providerID === id);
+  const hasAnyUnknown = params.agg.unknown.some((u) => u.key.sourceProviderID === id);
+
+  // Note: agg.byModel is already mapped to official pricing keys, not source provider IDs.
+  // So for connector providers we infer pricing availability based on whether we saw usage at all
+  // and whether it was mappable.
+  if (!hasAnyUsage && !hasAnyUnknown) {
+    return { id, pricing: "no", notes: "no local usage observed" };
+  }
+
+  if (hasAnyUnknown) {
+    return {
+      id,
+      pricing: "partial",
+      notes: "some models not in snapshot (see unknown_pricing)",
+    };
+  }
+
+  return {
+    id,
+    pricing: "yes",
+    notes: "model IDs map into snapshot pricing",
+  };
+}
 
 export async function buildQuotaStatusReport(params: {
   configSource: string;
@@ -258,6 +356,7 @@ export async function buildQuotaStatusReport(params: {
   const agg = await aggregateUsage({});
   const meta = getPricingSnapshotMeta();
   const providers = listProviders();
+  const coverage = computePricingCoverageFromAgg(agg);
 
   lines.push("");
   lines.push("pricing_snapshot:");
@@ -265,8 +364,23 @@ export async function buildQuotaStatusReport(params: {
   lines.push(`- generatedAt: ${new Date(meta.generatedAt).toISOString()}`);
   lines.push(`- units: ${meta.units}`);
   lines.push(`- providers: ${providers.join(",")}`);
+  lines.push(
+    `- coverage_seen: priced_keys=${fmtInt(coverage.totals.pricedKeysSeen)} mapped_but_missing=${fmtInt(coverage.totals.mappedMissingKeysSeen)}`,
+  );
   for (const p of providers) {
-    lines.push(`  - ${p}: models=${fmtInt(getProviderModelCount(p))}`);
+    const c = coverage.byProvider.get(p) ?? { pricedKeysSeen: 0, mappedMissingKeysSeen: 0 };
+    lines.push(
+      `  - ${p}: models=${fmtInt(getProviderModelCount(p))} priced_models_seen=${fmtInt(c.pricedKeysSeen)} mapped_but_missing_models_seen=${fmtInt(c.mappedMissingKeysSeen)}`,
+    );
+  }
+
+  // === supported providers pricing ===
+  const supported = getProviders().map((p) => p.id);
+  lines.push("");
+  lines.push("supported_providers_pricing:");
+  for (const id of supported) {
+    const row = supportedProviderPricingRow({ id, agg, snapshotProviders: providers });
+    lines.push(`- ${row.id}: pricing=${row.pricing} (${row.notes})`);
   }
 
   // === unknown pricing ===
