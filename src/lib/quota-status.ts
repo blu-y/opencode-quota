@@ -13,11 +13,9 @@ import {
 } from "./modelsdev-pricing.js";
 import { getPackageVersion } from "./version.js";
 import {
-  getOpenCodeMessageDir,
-  getOpenCodeMessageDirCandidates,
-  getOpenCodeSessionDir,
-  getOpenCodeSessionDirCandidates,
-  listSessionIDsFromMessageStorage,
+  getOpenCodeDbPath,
+  getOpenCodeDbPathCandidates,
+  getOpenCodeDbStats,
 } from "./opencode-storage.js";
 import { aggregateUsage } from "./quota-stats.js";
 
@@ -50,6 +48,7 @@ function tokensTotal(t: {
 }): number {
   return t.input + t.output + t.reasoning + t.cache_read + t.cache_write;
 }
+
 
 export async function buildQuotaStatusReport(params: {
   configSource: string;
@@ -193,39 +192,20 @@ export async function buildQuotaStatusReport(params: {
     `- antigravity accounts (present): ${presentCandidates.length ? presentCandidates.join(" | ") : "(none)"}`,
   );
 
-  const msgCandidates = getOpenCodeMessageDirCandidates();
-  const msgSelected = getOpenCodeMessageDir();
-  const msgPresent: string[] = [];
+  const dbCandidates = getOpenCodeDbPathCandidates();
+  const dbSelected = getOpenCodeDbPath();
+  const dbPresent: string[] = [];
   await Promise.all(
-    msgCandidates.map(async (p) => {
-      if (await pathExists(p)) msgPresent.push(p);
+    dbCandidates.map(async (p) => {
+      if (await pathExists(p)) dbPresent.push(p);
     }),
   );
 
-  const sesCandidates = getOpenCodeSessionDirCandidates();
-  const sesSelected = getOpenCodeSessionDir();
-  const sesPresent: string[] = [];
-  await Promise.all(
-    sesCandidates.map(async (p) => {
-      if (await pathExists(p)) sesPresent.push(p);
-    }),
-  );
-
-  lines.push(`- opencode storage message (selected): ${msgSelected}`);
+  lines.push(`- opencode db (preferred): ${dbSelected}`);
   lines.push(
-    `- opencode storage message (candidates): ${msgCandidates.length ? msgCandidates.join(" | ") : "(none)"}`,
+    `- opencode db (candidates): ${dbCandidates.length ? dbCandidates.join(" | ") : "(none)"}`,
   );
-  lines.push(
-    `- opencode storage message (present): ${msgPresent.length ? msgPresent.join(" | ") : "(none)"}`,
-  );
-
-  lines.push(`- opencode storage session (selected): ${sesSelected}`);
-  lines.push(
-    `- opencode storage session (candidates): ${sesCandidates.length ? sesCandidates.join(" | ") : "(none)"}`,
-  );
-  lines.push(
-    `- opencode storage session (present): ${sesPresent.length ? sesPresent.join(" | ") : "(none)"}`,
-  );
+  lines.push(`- opencode db (present): ${dbPresent.length ? dbPresent.join(" | ") : "(none)"}`);
 
   if (params.googleRefresh?.attempted) {
     lines.push("");
@@ -264,28 +244,33 @@ export async function buildQuotaStatusReport(params: {
     }
   }
 
+  // === storage scan ===
+  const dbStats = await getOpenCodeDbStats();
+  lines.push("");
+  lines.push("storage:");
+  lines.push(`- sessions_in_db: ${fmtInt(dbStats.sessionCount)}`);
+  lines.push(`- messages_in_db: ${fmtInt(dbStats.messageCount)}`);
+  lines.push(`- assistant_messages_in_db: ${fmtInt(dbStats.assistantMessageCount)}`);
+
   // === pricing snapshot ===
+  // We intentionally compute all-time usage once so that pricing coverage and unknown_pricing
+  // are consistent and do not require multiple storage scans.
+  const agg = await aggregateUsage({});
   const meta = getPricingSnapshotMeta();
+  const providers = listProviders();
+
   lines.push("");
   lines.push("pricing_snapshot:");
   lines.push(`- source: ${meta.source}`);
   lines.push(`- generatedAt: ${new Date(meta.generatedAt).toISOString()}`);
   lines.push(`- units: ${meta.units}`);
-  const providers = listProviders();
   lines.push(`- providers: ${providers.join(",")}`);
   for (const p of providers) {
     lines.push(`  - ${p}: models=${fmtInt(getProviderModelCount(p))}`);
   }
 
-  // === storage scan ===
-  const sessionIDs = await listSessionIDsFromMessageStorage();
-  lines.push("");
-  lines.push("storage:");
-  lines.push(`- sessions_in_message_storage: ${fmtInt(sessionIDs.length)}`);
-
   // === unknown pricing ===
   // We intentionally report unknowns for *all time* so users can see what needs mapping.
-  const agg = await aggregateUsage({});
   lines.push("");
   lines.push("unknown_pricing:");
   if (agg.unknown.length === 0) {

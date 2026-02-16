@@ -5,17 +5,47 @@
  * formatting and toast display stays universal across providers.
  */
 
-export interface QuotaToastEntry {
-  /**
-   * Display label (already human-friendly), e.g. "Copilot" or "Claude (abc..gmail)".
-   */
-  name: string;
+export type QuotaToastEntry =
+  | {
+      /**
+       * Percent-based entry (default).
+       * Note: kind is optional for backwards compatibility.
+       */
+      kind?: "percent";
 
-  /** Remaining quota as a percentage [0..100]. */
-  percentRemaining: number;
+      /** Display label (already human-friendly), e.g. "Copilot" or "Claude (abc..gmail)". */
+      name: string;
 
-  /** Optional ISO reset timestamp (shown when percentRemaining is < 100). */
-  resetTimeIso?: string;
+      /** Remaining quota as a percentage [0..100]. */
+      percentRemaining: number;
+
+      /** Optional ISO reset timestamp (shown when percentRemaining is < 100). */
+      resetTimeIso?: string;
+    }
+  | {
+      /** Value-based entry (no percent bar). */
+      kind: "value";
+
+      /** Display label (already human-friendly), e.g. "Firmware". */
+      name: string;
+
+      /** Human-readable value, e.g. "$42.50". */
+      value: string;
+
+      /** Optional ISO reset timestamp (shown when available). */
+      resetTimeIso?: string;
+    };
+
+export function isValueEntry(
+  e: QuotaToastEntry,
+): e is Extract<QuotaToastEntry, { kind: "value" }> {
+  return (e as any).kind === "value";
+}
+
+export function isPercentEntry(
+  e: QuotaToastEntry,
+): e is Extract<QuotaToastEntry, { percentRemaining: number }> {
+  return !isValueEntry(e);
 }
 
 export interface QuotaToastError {

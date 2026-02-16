@@ -1,22 +1,24 @@
-import { readdir, readFile } from "fs/promises";
 import { join } from "path";
 import { existsSync } from "fs";
 
 import { getOpencodeRuntimeDirCandidates } from "./opencode-runtime-paths.js";
 import { pickFirstExistingPath } from "./path-pick.js";
+import { openOpenCodeSqliteReadOnly } from "./opencode-sqlite.js";
 
 /**
- * Error thrown when a session directory is not found.
+ * Error thrown when a session is not found.
  *
- * This is thrown by iterAssistantMessagesForSession when the session
- * directory doesn't exist. Callers should catch this to handle gracefully.
+ * With OpenCode >=1.2, sessions/messages live in SQLite (`opencode.db`).
+ * This is thrown by iterAssistantMessagesForSession when the database is
+ * missing/unreadable, the session id is invalid, or the session row does
+ * not exist.
  */
 export class SessionNotFoundError extends Error {
   constructor(
     public readonly sessionID: string,
     public readonly checkedPath: string,
   ) {
-    super(`Session directory not found: ${sessionID}`);
+    super(`Session not found: ${sessionID}`);
     this.name = "SessionNotFoundError";
   }
 }
@@ -59,6 +61,13 @@ export interface OpenCodeSessionInfo {
   };
 }
 
+export type OpenCodeDbStats = {
+  dbPath: string;
+  sessionCount: number;
+  messageCount: number;
+  assistantMessageCount: number;
+};
+
 export function getOpenCodeDataDirCandidates(): string[] {
   // OpenCode stores data under `${Global.Path.data}` which is `join(xdgData, "opencode")`.
   // We return candidate opencode data dirs in priority order.
@@ -69,50 +78,169 @@ export function getOpenCodeDataDir(): string {
   return pickFirstExistingPath(getOpenCodeDataDirCandidates());
 }
 
-export function getOpenCodeStorageDirCandidates(): string[] {
-  return getOpenCodeDataDirCandidates().map((d) => join(d, "storage"));
+export function getOpenCodeDbPathCandidates(): string[] {
+  return getOpenCodeDataDirCandidates().map((d) => join(d, "opencode.db"));
 }
 
-export function getOpenCodeStorageDir(): string {
-  return pickFirstExistingPath(getOpenCodeStorageDirCandidates());
+export function getOpenCodeDbPath(): string {
+  return pickFirstExistingPath(getOpenCodeDbPathCandidates());
 }
 
-export function getOpenCodeMessageDirCandidates(): string[] {
-  return getOpenCodeStorageDirCandidates().map((d) => join(d, "message"));
-}
+type MessageRow = {
+  id: string;
+  session_id: string;
+  time_created: number;
+  time_updated?: number;
+  data: string;
+};
 
-export function getOpenCodeMessageDir(): string {
-  return pickFirstExistingPath(getOpenCodeMessageDirCandidates());
-}
+type SessionRow = {
+  id: string;
+  title: string | null;
+  parent_id: string | null;
+  time_created: number;
+  time_updated: number;
+};
 
-export function getOpenCodeSessionDirCandidates(): string[] {
-  return getOpenCodeStorageDirCandidates().map((d) => join(d, "session"));
-}
-
-export function getOpenCodeSessionDir(): string {
-  return pickFirstExistingPath(getOpenCodeSessionDirCandidates());
-}
-
-async function safeReadJson(path: string): Promise<any | null> {
+function safeJsonParse(raw: string): any | null {
   try {
-    const raw = await readFile(path, "utf-8");
     return JSON.parse(raw) as any;
   } catch {
     return null;
   }
 }
 
-export async function listSessionIDsFromMessageStorage(): Promise<string[]> {
-  const base = getOpenCodeMessageDir();
-  if (!existsSync(base)) return [];
+function normalizeNumber(n: unknown): number | undefined {
+  return typeof n === "number" && Number.isFinite(n) ? n : undefined;
+}
+
+function normalizeString(s: unknown): string | undefined {
+  return typeof s === "string" ? s : undefined;
+}
+
+function mapRowToOpenCodeMessage(row: MessageRow): OpenCodeMessage | null {
+  if (!row || typeof row !== "object") return null;
+  if (typeof row.id !== "string" || typeof row.session_id !== "string") return null;
+  if (typeof row.time_created !== "number") return null;
+
+  const payload = safeJsonParse(row.data);
+  if (!payload || typeof payload !== "object") return null;
+
+  const role = normalizeString((payload as any).role) ?? "unknown";
+
+  return {
+    id: row.id,
+    sessionID: row.session_id,
+    role,
+    providerID: normalizeString((payload as any).providerID),
+    modelID: normalizeString((payload as any).modelID),
+    tokens: (payload as any).tokens,
+    cost: normalizeNumber((payload as any).cost),
+    time: {
+      created: row.time_created,
+      completed: normalizeNumber((payload as any).time?.completed),
+    },
+    agent: normalizeString((payload as any).agent),
+    mode: normalizeString((payload as any).mode),
+  };
+}
+
+function openDbOrNull(): { dbPath: string; open: () => ReturnType<typeof openOpenCodeSqliteReadOnly> } | null {
+  const dbPath = getOpenCodeDbPath();
+  if (!dbPath) return null;
+  if (!existsSync(dbPath)) return null;
+  return {
+    dbPath,
+    open: () => openOpenCodeSqliteReadOnly(dbPath),
+  };
+}
+
+function validateSessionIdOrThrow(sessionID: string): void {
+  if (!sessionID.startsWith("ses_")) {
+    throw new SessionNotFoundError(sessionID, "(invalid session ID format)");
+  }
+}
+
+function buildMessageQuery(params: {
+  sessionID?: string;
+  sinceMs?: number;
+  untilMs?: number;
+}): { sql: string; args: unknown[] } {
+  const where: string[] = [];
+  const args: unknown[] = [];
+
+  if (params.sessionID) {
+    where.push(`session_id = ?`);
+    args.push(params.sessionID);
+  }
+
+  if (typeof params.sinceMs === "number") {
+    where.push(`time_created >= ?`);
+    args.push(params.sinceMs);
+  }
+
+  if (typeof params.untilMs === "number") {
+    where.push(`time_created <= ?`);
+    args.push(params.untilMs);
+  }
+
+  const sql =
+    `SELECT id, session_id, time_created, time_updated, data FROM "message"` +
+    (where.length ? ` WHERE ${where.join(" AND ")}` : "") +
+    ` ORDER BY time_created ASC, id ASC`;
+
+  return { sql, args };
+}
+
+async function hasJsonExtract(conn: { get<T = unknown>(sql: string, params?: unknown[]): T | null }): Promise<boolean> {
   try {
-    const entries = await readdir(base, { withFileTypes: true });
-    return entries
-      .filter((e) => e.isDirectory() && e.name.startsWith("ses_"))
-      .map((e) => e.name)
-      .sort();
+    const row = conn.get<{ r: string }>(
+      "SELECT json_extract('{\"role\":\"assistant\"}', '$.role') as r",
+    );
+    return row?.r === "assistant";
   } catch {
-    return [];
+    return false;
+  }
+}
+
+export async function getOpenCodeDbStats(): Promise<OpenCodeDbStats> {
+  const db = openDbOrNull();
+  if (!db) {
+    return {
+      dbPath: getOpenCodeDbPath(),
+      sessionCount: 0,
+      messageCount: 0,
+      assistantMessageCount: 0,
+    };
+  }
+
+  const conn = await db.open();
+  try {
+    const sessionRow = conn.get<{ c: number }>(`SELECT count(*) as c FROM "session"`);
+    const messageRow = conn.get<{ c: number }>(`SELECT count(*) as c FROM "message"`);
+
+    let assistantCount = 0;
+    if (await hasJsonExtract(conn)) {
+      const a = conn.get<{ c: number }>(
+        `SELECT count(*) as c FROM "message" WHERE json_extract(data, '$.role') = 'assistant'`,
+      );
+      assistantCount = typeof a?.c === "number" ? a.c : 0;
+    } else {
+      const rows = conn.all<{ data: string }>(`SELECT data FROM "message"`);
+      for (const r of rows) {
+        const payload = safeJsonParse(r.data);
+        if (payload && (payload as any).role === "assistant") assistantCount += 1;
+      }
+    }
+
+    return {
+      dbPath: db.dbPath,
+      sessionCount: typeof sessionRow?.c === "number" ? sessionRow.c : 0,
+      messageCount: typeof messageRow?.c === "number" ? messageRow.c : 0,
+      assistantMessageCount: assistantCount,
+    };
+  } finally {
+    conn.close();
   }
 }
 
@@ -120,48 +248,29 @@ export async function iterAssistantMessages(params: {
   sinceMs?: number;
   untilMs?: number;
 }): Promise<OpenCodeMessage[]> {
-  const base = getOpenCodeMessageDir();
-  if (!existsSync(base)) return [];
+  const db = openDbOrNull();
+  if (!db) return [];
 
-  const sessionIDs = await listSessionIDsFromMessageStorage();
-  const out: OpenCodeMessage[] = [];
+  const conn = await db.open();
+  try {
+    const q = buildMessageQuery({ sinceMs: params.sinceMs, untilMs: params.untilMs });
+    const rows = conn.all<MessageRow>(q.sql, q.args);
 
-  for (const sessionID of sessionIDs) {
-    const dir = join(base, sessionID);
-    let files: string[];
-    try {
-      files = (await readdir(dir)).filter((f) => f.endsWith(".json"));
-    } catch {
-      continue;
-    }
-
-    for (const f of files) {
-      const p = join(dir, f);
-      const msg = (await safeReadJson(p)) as OpenCodeMessage | null;
+    const out: OpenCodeMessage[] = [];
+    for (const row of rows) {
+      const msg = mapRowToOpenCodeMessage(row);
       if (!msg) continue;
-      if (msg.role !== "assistant") continue;
-      const created = msg.time?.created;
-      if (typeof created !== "number") continue;
-      if (typeof params.sinceMs === "number" && created < params.sinceMs) continue;
-      if (typeof params.untilMs === "number" && created > params.untilMs) continue;
+      if (String(msg.role).toLowerCase() !== "assistant") continue;
       out.push(msg);
     }
+    return out;
+  } finally {
+    conn.close();
   }
-
-  out.sort((a, b) => (a.time?.created ?? 0) - (b.time?.created ?? 0));
-  return out;
 }
 
 /**
  * Read assistant messages for a specific session only.
- *
- * This is more efficient than iterAssistantMessages when you only need
- * messages from a single session, as it only reads that session's directory.
- *
- * @param params.sessionID - Session ID (must start with "ses_")
- * @param params.sinceMs - Optional: only messages created after this timestamp
- * @param params.untilMs - Optional: only messages created before this timestamp
- * @throws SessionNotFoundError if the session directory doesn't exist
  */
 export async function iterAssistantMessagesForSession(params: {
   sessionID: string;
@@ -169,80 +278,64 @@ export async function iterAssistantMessagesForSession(params: {
   untilMs?: number;
 }): Promise<OpenCodeMessage[]> {
   const { sessionID, sinceMs, untilMs } = params;
+  validateSessionIdOrThrow(sessionID);
 
-  // Validate session ID format
-  if (!sessionID.startsWith("ses_")) {
-    throw new SessionNotFoundError(sessionID, "(invalid session ID format)");
+  const db = openDbOrNull();
+  if (!db) {
+    throw new SessionNotFoundError(sessionID, getOpenCodeDbPath());
   }
 
-  const base = getOpenCodeMessageDir();
-  const sessionDir = join(base, sessionID);
-
-  // Check if session directory exists
-  if (!existsSync(sessionDir)) {
-    throw new SessionNotFoundError(sessionID, sessionDir);
-  }
-
-  // Read messages from this session only
-  let files: string[];
+  const conn = await db.open();
   try {
-    files = (await readdir(sessionDir)).filter((f) => f.endsWith(".json"));
-  } catch {
-    throw new SessionNotFoundError(sessionID, sessionDir);
+    const exists = conn.get<{ ok: number }>(`SELECT 1 as ok FROM "session" WHERE id = ? LIMIT 1`, [
+      sessionID,
+    ]);
+    if (!exists) {
+      throw new SessionNotFoundError(sessionID, db.dbPath);
+    }
+
+    const q = buildMessageQuery({ sessionID, sinceMs, untilMs });
+    const rows = conn.all<MessageRow>(q.sql, q.args);
+
+    const out: OpenCodeMessage[] = [];
+    for (const row of rows) {
+      const msg = mapRowToOpenCodeMessage(row);
+      if (!msg) continue;
+      if (String(msg.role).toLowerCase() !== "assistant") continue;
+      out.push(msg);
+    }
+    return out;
+  } finally {
+    conn.close();
   }
-
-  const out: OpenCodeMessage[] = [];
-
-  for (const f of files) {
-    const p = join(sessionDir, f);
-    const msg = (await safeReadJson(p)) as OpenCodeMessage | null;
-    if (!msg) continue;
-    if (msg.role !== "assistant") continue;
-    const created = msg.time?.created;
-    if (typeof created !== "number") continue;
-    if (typeof sinceMs === "number" && created < sinceMs) continue;
-    if (typeof untilMs === "number" && created > untilMs) continue;
-    out.push(msg);
-  }
-
-  out.sort((a, b) => (a.time?.created ?? 0) - (b.time?.created ?? 0));
-  return out;
 }
 
 export async function readAllSessionsIndex(): Promise<Record<string, OpenCodeSessionInfo>> {
-  const base = getOpenCodeSessionDir();
+  const db = openDbOrNull();
   const idx: Record<string, OpenCodeSessionInfo> = {};
-  if (!existsSync(base)) return idx;
+  if (!db) return idx;
 
-  async function visit(dir: string): Promise<void> {
-    let entries;
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
+  const conn = await db.open();
+  try {
+    const rows = conn.all<SessionRow>(
+      `SELECT id, title, parent_id, time_created, time_updated FROM "session" ORDER BY time_created ASC, id ASC`,
+    );
+
+    for (const row of rows) {
+      if (!row || typeof row.id !== "string" || !row.id.startsWith("ses_")) continue;
+      idx[row.id] = {
+        id: row.id,
+        title: typeof row.title === "string" && row.title.trim() ? row.title : undefined,
+        parentID: typeof row.parent_id === "string" ? row.parent_id : undefined,
+        time: {
+          created: typeof row.time_created === "number" ? row.time_created : undefined,
+          updated: typeof row.time_updated === "number" ? row.time_updated : undefined,
+        },
+      };
     }
-    for (const e of entries) {
-      const p = join(dir, e.name);
-      if (e.isDirectory()) {
-        await visit(p);
-      } else if (e.isFile() && e.name.startsWith("ses_") && e.name.endsWith(".json")) {
-        const data = await safeReadJson(p);
-        if (!data || typeof data !== "object") continue;
-        const id = data.id;
-        if (typeof id !== "string" || !id.startsWith("ses_")) continue;
-        idx[id] = {
-          id,
-          title: typeof data.title === "string" ? data.title : undefined,
-          parentID: typeof data.parentID === "string" ? data.parentID : undefined,
-          time: {
-            created: typeof data.time?.created === "number" ? data.time.created : undefined,
-            updated: typeof data.time?.updated === "number" ? data.time.updated : undefined,
-          },
-        };
-      }
-    }
+
+    return idx;
+  } finally {
+    conn.close();
   }
-
-  await visit(base);
-  return idx;
 }

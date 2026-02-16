@@ -3,6 +3,7 @@
  */
 
 import type { QuotaToastEntry, QuotaToastError, SessionTokensData } from "./entries.js";
+import { isValueEntry } from "./entries.js";
 import { bar, clampInt, formatResetCountdown, padLeft, padRight } from "./format-utils.js";
 import { formatQuotaRowsGrouped, type ToastGroupEntry } from "./toast-format-grouped.js";
 import { renderSessionTokensLines } from "./session-tokens-format.js";
@@ -50,7 +51,7 @@ export function formatQuotaRows(params: {
 
   const lines: string[] = [];
 
-  const addEntry = (name: string, resetIso: string | undefined, remaining: number) => {
+  const addPercentEntry = (name: string, resetIso: string | undefined, remaining: number) => {
     // Show reset countdown whenever quota is not fully available.
     // (i.e., any usage at all, or depleted)
     const timeStr = remaining < 100 ? formatResetCountdown(resetIso, { missing: "-" }) : "";
@@ -81,8 +82,46 @@ export function formatQuotaRows(params: {
     lines.push(barLine);
   };
 
+  const addValueEntry = (name: string, resetIso: string | undefined, value: string) => {
+    const timeStr = formatResetCountdown(resetIso, { missing: "-" });
+
+    if (isTiny) {
+      // Tiny: single line without percent; keep time col alignment.
+      const valueCol = Math.min(value.length, Math.max(6, percentCol + 2));
+      const tinyNameCol =
+        maxWidth - separator.length - timeCol - separator.length - valueCol;
+      const nameCol = Math.max(1, tinyNameCol);
+      const line = [
+        padRight(name, nameCol),
+        padLeft(timeStr, timeCol),
+        padLeft(value, valueCol),
+      ].join(separator);
+      lines.push(line.slice(0, maxWidth));
+      return;
+    }
+
+    const right = value;
+    const rightWidth = Math.max(right.length, 6);
+    const timeWidth = Math.max(timeStr.length, timeCol);
+    const leftWidth = Math.max(
+      1,
+      maxWidth - separator.length - rightWidth - separator.length - timeWidth,
+    );
+    const line =
+      padRight(name, leftWidth) +
+      separator +
+      padLeft(right, rightWidth) +
+      separator +
+      padLeft(timeStr, timeWidth);
+    lines.push(line.slice(0, maxWidth));
+  };
+
   for (const entry of params.entries ?? []) {
-    addEntry(entry.name, entry.resetTimeIso, entry.percentRemaining);
+    if (isValueEntry(entry)) {
+      addValueEntry(entry.name, entry.resetTimeIso, entry.value);
+    } else {
+      addPercentEntry(entry.name, entry.resetTimeIso, entry.percentRemaining);
+    }
   }
 
   // Add error rows (rendered as "label: message")

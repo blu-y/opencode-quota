@@ -76,6 +76,11 @@ export function formatTokenCount(count: number): string {
  *
  * Removes common prefixes/suffixes before truncating with ellipsis.
  */
+export function fmtUsdAmount(n: number): string {
+  if (!Number.isFinite(n)) return "$0.00";
+  return `$${n.toFixed(2)}`;
+}
+
 export function shortenModelName(name: string, maxLen: number): string {
   if (name.length <= maxLen) return name;
   // Remove common prefixes/suffixes

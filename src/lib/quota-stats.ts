@@ -5,7 +5,7 @@ import {
   readAllSessionsIndex,
   SessionNotFoundError,
 } from "./opencode-storage.js";
-import { lookupCost } from "./modelsdev-pricing.js";
+import { inferProviderForModelId, listProviders, lookupCost } from "./modelsdev-pricing.js";
 
 // Re-export for consumers
 export { SessionNotFoundError } from "./opencode-storage.js";
@@ -129,18 +129,25 @@ function normalizeModelId(raw: string): string {
 }
 
 function inferOfficialProviderFromModelId(modelId: string): string | null {
+  // Prefer snapshot-driven inference when possible.
+  // This keeps mapping future-proof as models.dev adds providers/models.
+  const snapProvider = inferProviderForModelId(modelId);
+  if (snapProvider) return snapProvider;
+
   const lower = modelId.toLowerCase();
   if (lower.startsWith("claude")) return "anthropic";
   if (lower.startsWith("gpt") || lower.startsWith("o")) return "openai";
   if (lower.startsWith("gemini")) return "google";
   if (lower.startsWith("kimi")) return "moonshotai";
   if (lower.startsWith("glm")) return "zai";
+  if (lower.startsWith("grok")) return "xai";
   // heuristics
   if (lower.includes("claude")) return "anthropic";
   if (lower.includes("gemini")) return "google";
   if (lower.includes("gpt")) return "openai";
   if (lower.includes("kimi")) return "moonshotai";
   if (lower.includes("glm")) return "zai";
+  if (lower.includes("grok")) return "xai";
   return null;
 }
 
@@ -168,6 +175,16 @@ function mapToOfficialPricingKey(source: {
   providerID?: string;
   modelID?: string;
 }): { ok: true; key: PricedKey } | { ok: false; unknown: UnknownKey } {
+  // Smart fallback: if our provider inference yields a providerId that doesn't exist
+  // in the snapshot (e.g. provider renames like zai->zai, xai->zai), try to discover
+  // the provider by scanning snapshot providers for an exact modelId match.
+  // This is intentionally conservative (exact match only) to avoid bad pricing.
+  const tryFindProviderByExactModel = (normalizedModel: string): string | null => {
+    for (const p of listProviders()) {
+      if (lookupCost(p, normalizedModel)) return p;
+    }
+    return null;
+  };
   const srcProvider = source.providerID ?? "unknown";
   const srcModel = source.modelID ?? "unknown";
 
@@ -178,6 +195,9 @@ function mapToOfficialPricingKey(source: {
   const normalizedModel = normalizeModelId(source.modelID);
   const inferredProvider = inferOfficialProviderFromModelId(normalizedModel);
   if (!inferredProvider) {
+    const found = tryFindProviderByExactModel(normalizedModel);
+    if (found) return { ok: true, key: { provider: found, model: normalizedModel } };
+
     return {
       ok: false,
       unknown: {
@@ -187,6 +207,12 @@ function mapToOfficialPricingKey(source: {
         mappedModel: normalizedModel,
       },
     };
+  }
+
+  // If inferred provider doesn't exist in snapshot, try to locate the provider by exact match.
+  if (!lookupCost(inferredProvider, normalizedModel)) {
+    const found = tryFindProviderByExactModel(normalizedModel);
+    if (found) return { ok: true, key: { provider: found, model: normalizedModel } };
   }
 
   // Kimi naming: some logs use kimi-k2-thinking, but models.dev doesn't have kimi-k2.

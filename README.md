@@ -12,6 +12,12 @@ Monitor quota and tokens for OpenCode providers via Toasts and Commands. Zero LL
 
 ![Image of /quota and /tokens_daily outputs](https://github.com/slkiser/opencode-quota/blob/main/quota.png)
 
+## Requirements
+
+- OpenCode >= 1.2.0 (uses SQLite `opencode.db` for session/message history)
+
+This plugin no longer supports the legacy folder-based JSON session storage used by older OpenCode versions.
+
 ## Installation
 
 Add to your `opencode.json` (strict JSON) or `opencode.jsonc` (JSONC with comments/trailing commas):
@@ -52,9 +58,6 @@ That's it. Providers are auto-detected based on your OpenCode configuration. Toa
 | `/tokens_all`            | Tokens used all time                             |
 | `/tokens_session`        | Tokens used in current session                   |
 | `/tokens_between`        | Tokens between two dates (YYYY-MM-DD)            |
-|                          |                                                  |
-| `/firmware_reset_window` | Resets Firmware 5-hour window (requires confirm) |
-
 ## Supported Providers
 
 | Provider           | Config ID            | Auth Source                                   |
@@ -120,7 +123,7 @@ Works automatically if OpenCode has Firmware configured. Alternatively, provide 
 
 The `apiKey` field supports `{env:VAR_NAME}` syntax or a direct key.
 
-**Firmware-specific command:** Use `/firmware_reset_window confirm` to reset your 5-hour spending window (consumes 1 of 2 weekly resets). Running without `confirm` shows a warning first.
+
 
 </details>
 
@@ -191,7 +194,9 @@ All options go under `experimental.quotaToast` in `opencode.json` or `opencode.j
 
 ## Troubleshooting
 
-Toast not appearing? Run `/quota_status` to check config and provider availability.
+Toast not appearing? Run `/quota_status` to check config, provider availability, and whether `opencode.db` is detected.
+
+If `opencode.db` is missing, run OpenCode once (OpenCode performs a one-time migration into SQLite on first run after upgrade).
 
 ---
 

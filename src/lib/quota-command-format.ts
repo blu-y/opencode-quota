@@ -8,6 +8,7 @@
  */
 
 import type { QuotaToastError, SessionTokensData } from "./entries.js";
+import { isValueEntry } from "./entries.js";
 import { bar, clampInt, padRight } from "./format-utils.js";
 import type { ToastGroupEntry } from "./toast-format-grouped.js";
 import { renderSessionTokensLines } from "./session-tokens-format.js";
@@ -106,8 +107,14 @@ export function formatQuotaCommand(params: {
     for (const row of list) {
       const label = (row.label ?? row.name).trim();
       const labelCol = padRight(label, leftCol);
-      const pct = clampInt(row.percentRemaining, 0, 100);
       const suffix = formatResetsIn(row.resetTimeIso);
+
+      if (isValueEntry(row)) {
+        lines.push(`  ${labelCol} ${row.value}${suffix}`);
+        continue;
+      }
+
+      const pct = clampInt(row.percentRemaining, 0, 100);
       lines.push(`  ${labelCol} ${bar(pct, barWidth)}  ${pct}% left${suffix}`);
     }
   }

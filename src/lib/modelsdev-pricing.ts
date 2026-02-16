@@ -19,6 +19,7 @@ type Snapshot = {
 };
 
 let SNAPSHOT: Snapshot | null = null;
+let MODEL_INDEX: Map<string, string[]> | null = null;
 
 function ensureLoaded(): Snapshot {
   if (SNAPSHOT) return SNAPSHOT;
@@ -28,12 +29,46 @@ function ensureLoaded(): Snapshot {
   return SNAPSHOT;
 }
 
+function ensureModelIndex(): Map<string, string[]> {
+  if (MODEL_INDEX) return MODEL_INDEX;
+  const snap = ensureLoaded();
+  const idx = new Map<string, string[]>();
+
+  for (const providerId of Object.keys(snap.providers)) {
+    const models = snap.providers[providerId] ?? {};
+    for (const modelId of Object.keys(models)) {
+      const existing = idx.get(modelId);
+      if (existing) existing.push(providerId);
+      else idx.set(modelId, [providerId]);
+    }
+  }
+
+  MODEL_INDEX = idx;
+  return idx;
+}
+
 export function getPricingSnapshotMeta(): Snapshot["_meta"] {
   return ensureLoaded()._meta;
 }
 
 export function hasProvider(providerId: string): boolean {
   return !!ensureLoaded().providers[providerId];
+}
+
+export function hasModel(providerId: string, modelId: string): boolean {
+  const p = ensureLoaded().providers[providerId];
+  if (!p) return false;
+  return !!p[modelId];
+}
+
+/**
+ * Infer the snapshot provider that owns a modelId.
+ * Returns null when model is not found or is ambiguous across providers.
+ */
+export function inferProviderForModelId(modelId: string): string | null {
+  const providers = ensureModelIndex().get(modelId);
+  if (!providers || providers.length !== 1) return null;
+  return providers[0] ?? null;
 }
 
 export function getProviderModelCount(providerId: string): number {

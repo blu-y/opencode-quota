@@ -22,7 +22,6 @@ import { fetchSessionTokensForDisplay } from "./lib/session-tokens.js";
 import { formatQuotaStatsReport } from "./lib/quota-stats-format.js";
 import { buildQuotaStatusReport, type SessionTokenError } from "./lib/quota-status.js";
 import { refreshGoogleTokensForAllAccounts } from "./lib/google.js";
-import { resetFirmwareQuotaWindow } from "./lib/firmware.js";
 import {
   parseOptionalJsonArgs,
   parseQuotaBetweenArgs,
@@ -827,11 +826,6 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
         description:
           "Diagnostics for toast + pricing + local storage (includes unknown pricing report).",
       };
-      cfg.command["firmware_reset_window"] = {
-        template: "/firmware_reset_window",
-        description:
-          "Manually reset your Firmware 5-hour spending window (consumes 1 of 2 weekly resets).",
-      };
 
       // Register token report commands (/tokens_*)
       for (const spec of TOKEN_REPORT_COMMANDS) {
@@ -1014,65 +1008,6 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
         handled();
       }
 
-      // Handle /firmware_reset_window (reset 5-hour spending window)
-      if (cmd === "firmware_reset_window") {
-        const raw = input.arguments?.trim() || "";
-
-        // Check for confirmation: accept "confirm" as positional or {"confirm": true} as JSON
-        let confirmed = false;
-        if (raw.toLowerCase() === "confirm") {
-          confirmed = true;
-        } else if (raw.startsWith("{")) {
-          try {
-            const parsed = JSON.parse(raw) as Record<string, unknown>;
-            confirmed = parsed["confirm"] === true;
-          } catch {
-            await injectRawOutput(
-              sessionID,
-              `Invalid JSON arguments for /firmware_reset_window\n\nTo proceed, run:\n/firmware_reset_window confirm`,
-            );
-            handled();
-          }
-        }
-
-        // Require explicit confirmation (destructive action with limited weekly resets)
-        if (!confirmed) {
-          await injectRawOutput(
-            sessionID,
-            `⚠️ This will reset your Firmware 5-hour spending window.\nYou have a maximum of 2 resets per week.\n\nTo proceed, run:\n/firmware_reset_window confirm`,
-          );
-          handled();
-        }
-
-        const result = await resetFirmwareQuotaWindow();
-
-        if (!result) {
-          await injectRawOutput(sessionID, "Firmware API key not configured. Cannot reset window.");
-          handled();
-        }
-
-        if (!result.success) {
-          await injectRawOutput(sessionID, `Failed to reset Firmware window:\n${result.error}`);
-          handled();
-        }
-
-        // Build success message
-        const resetsLeft = result.windowResetsRemaining;
-        const resetsMsg =
-          resetsLeft !== undefined
-            ? ` (${resetsLeft} reset${resetsLeft === 1 ? "" : "s"} remaining this week)`
-            : "";
-
-        // Fetch updated quota to show new status
-        const quotaMsg = await fetchQuotaCommandMessage(
-          "command:/firmware_reset_window",
-          sessionID,
-        );
-        const successOutput = `✓ Firmware 5-hour window reset successful${resetsMsg}${quotaMsg ? `\n\n${quotaMsg}` : ""}`;
-
-        await injectRawOutput(sessionID, successOutput);
-        handled();
-      }
     },
 
     tool: {
@@ -1108,62 +1043,6 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
         },
       }),
 
-      firmware_reset_window: tool({
-        description:
-          "Manually reset your Firmware 5-hour spending window. Consumes 1 of 2 weekly resets. Requires confirm=true.",
-        args: {
-          confirm: tool.schema
-            .boolean()
-            .optional()
-            .describe("Must be true to proceed (destructive action with limited weekly resets)"),
-        },
-        async execute(args, context) {
-          // Require explicit confirmation (destructive action with limited weekly resets)
-          if (args.confirm !== true) {
-            await injectRawOutput(
-              context.sessionID,
-              `⚠️ This will reset your Firmware 5-hour spending window.\nYou have a maximum of 2 resets per week.\n\nTo proceed, call with confirm: true`,
-            );
-            return "";
-          }
-
-          const result = await resetFirmwareQuotaWindow();
-
-          if (!result) {
-            await injectRawOutput(
-              context.sessionID,
-              "Firmware API key not configured. Cannot reset window.",
-            );
-            return "";
-          }
-
-          if (!result.success) {
-            await injectRawOutput(
-              context.sessionID,
-              `Failed to reset Firmware window:\n${result.error}`,
-            );
-            return "";
-          }
-
-          // Build success message
-          const resetsLeft = result.windowResetsRemaining;
-          const resetsMsg =
-            resetsLeft !== undefined
-              ? ` (${resetsLeft} reset${resetsLeft === 1 ? "" : "s"} remaining this week)`
-              : "";
-
-          // Fetch updated quota to show new status
-          const quotaMsg = await fetchQuotaCommandMessage(
-            "tool:firmware_reset_window",
-            context.sessionID,
-          );
-          const successOutput = `✓ Firmware 5-hour window reset successful${resetsMsg}${quotaMsg ? `\n\n${quotaMsg}` : ""}`;
-
-          context.metadata({ title: "Firmware Window Reset" });
-          await injectRawOutput(context.sessionID, successOutput);
-          return ""; // Empty return - output already injected with noReply
-        },
-      }),
     },
 
     // Event hook for session.idle and session.compacted

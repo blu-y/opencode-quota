@@ -6,6 +6,7 @@
  */
 
 import type { QuotaToastEntry, QuotaToastError, SessionTokensData } from "./entries.js";
+import { isValueEntry } from "./entries.js";
 import { bar, clampInt, formatResetCountdown, padLeft, padRight } from "./format-utils.js";
 import { renderSessionTokensLines } from "./session-tokens-format.js";
 
@@ -81,10 +82,48 @@ export function formatQuotaRowsGrouped(params: {
 
     for (const entry of list) {
       const label = entry.label?.trim() || entry.name;
+      const right = entry.right ? entry.right.trim() : "";
+
+      if (isValueEntry(entry)) {
+        const timeStr = formatResetCountdown(entry.resetTimeIso);
+        const value = entry.value.trim();
+
+        if (isTiny) {
+          // Tiny: "label  time  value"
+          const valueCol = Math.min(value.length, Math.max(6, percentCol + 2));
+          const tinyNameCol = maxWidth - separator.length - timeCol - separator.length - valueCol;
+          const leftText = right ? `${label} ${right}` : label;
+          const line = [
+            padRight(leftText, tinyNameCol),
+            padLeft(timeStr, timeCol),
+            padLeft(value, valueCol),
+          ].join(separator);
+          lines.push(line.slice(0, maxWidth));
+          continue;
+        }
+
+        // Non-tiny: single line (no bar)
+        const timeWidth = Math.max(timeStr.length, timeCol);
+        const valueWidth = Math.max(value.length, 6);
+        const leftMax = Math.max(
+          1,
+          barWidth - separator.length - valueWidth - separator.length - timeWidth,
+        );
+        const leftText = right ? `${label} ${right}` : label;
+        lines.push(
+          (padRight(leftText, leftMax) +
+            separator +
+            padLeft(value, valueWidth) +
+            separator +
+            padLeft(timeStr, timeWidth)).slice(0, maxWidth),
+        );
+        continue;
+      }
+
+      // Percent entries
       // Show reset countdown whenever quota is not fully available.
       // (i.e., any usage at all, or depleted)
       const timeStr = entry.percentRemaining < 100 ? formatResetCountdown(entry.resetTimeIso) : "";
-      const right = entry.right ? entry.right.trim() : "";
 
       if (isTiny) {
         // Tiny: "label  time  XX%" (ignore bar)

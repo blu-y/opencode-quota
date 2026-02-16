@@ -7,7 +7,6 @@
 
 import type { QuotaError } from "./types.js";
 import { fetchWithTimeout } from "./http.js";
-import { clampPercent } from "./format-utils.js";
 import {
   resolveFirmwareApiKey,
   hasFirmwareApiKey,
@@ -15,19 +14,10 @@ import {
   type FirmwareKeySource,
 } from "./firmware-config.js";
 
-/** New v1 API response shape */
+/** v1 API response shape (credits + reset) */
 interface FirmwareQuotaV1Response {
-  windowUsed: number; // 0-1 ratio
-  windowReset: string | null;
-  weeklyUsed: number; // 0-1 ratio
-  weeklyReset: string | null;
-  windowResetsRemaining: number; // 0-2
-}
-
-/** Single window quota info */
-export interface FirmwareWindowQuota {
-  percentRemaining: number;
-  resetTimeIso?: string;
+  credits: number;
+  reset: string | null;
 }
 
 /**
@@ -55,27 +45,18 @@ async function readFirmwareAuth(): Promise<FirmwareApiAuth | null> {
 export type FirmwareResult =
   | {
       success: true;
-      /** Back-compat: worst of 5h window and weekly (for classic toast) */
-      percentRemaining: number;
+      creditsUsd: number;
       resetTimeIso?: string;
-      /** Individual windows for grouped display */
-      windows: {
-        window: FirmwareWindowQuota;
-        weekly: FirmwareWindowQuota;
-      };
-      /** Manual resets available this week (0-2) */
-      windowResetsRemaining: number;
     }
   | QuotaError
   | null;
 
 export type FirmwareResetWindowResult =
-  | { success: true; windowResetsRemaining?: number }
+  | { success: true }
   | QuotaError
   | null;
 
 const FIRMWARE_QUOTA_URL = "https://app.firmware.ai/api/v1/quota";
-const FIRMWARE_RESET_WINDOW_URL = "https://app.firmware.ai/api/v1/quota/reset-window";
 
 export async function hasFirmwareApiKeyConfigured(): Promise<boolean> {
   return await hasFirmwareApiKey();
@@ -106,51 +87,17 @@ export async function queryFirmwareQuota(): Promise<FirmwareResult> {
 
     const data = (await resp.json()) as FirmwareQuotaV1Response;
 
-    // Parse 5-hour window
-    const windowUsed = typeof data.windowUsed === "number" ? data.windowUsed : NaN;
-    const windowPercentRemaining = clampPercent(100 - windowUsed * 100);
-    const windowResetIso =
-      typeof data.windowReset === "string" && data.windowReset.length > 0
-        ? data.windowReset
-        : undefined;
+    const creditsUsd = typeof data.credits === "number" ? data.credits : NaN;
+    const resetTimeIso = typeof data.reset === "string" && data.reset.length > 0 ? data.reset : undefined;
 
-    // Parse weekly
-    const weeklyUsed = typeof data.weeklyUsed === "number" ? data.weeklyUsed : NaN;
-    const weeklyPercentRemaining = clampPercent(100 - weeklyUsed * 100);
-    const weeklyResetIso =
-      typeof data.weeklyReset === "string" && data.weeklyReset.length > 0
-        ? data.weeklyReset
-        : undefined;
-
-    // Parse resets remaining (use trunc to avoid surprising rounding)
-    const windowResetsRemaining =
-      typeof data.windowResetsRemaining === "number"
-        ? Math.max(0, Math.min(2, Math.trunc(data.windowResetsRemaining)))
-        : 0;
-
-    // Back-compat: use worst window for classic display
-    const windowQuota: FirmwareWindowQuota = {
-      percentRemaining: windowPercentRemaining,
-      resetTimeIso: windowResetIso,
-    };
-    const weeklyQuota: FirmwareWindowQuota = {
-      percentRemaining: weeklyPercentRemaining,
-      resetTimeIso: weeklyResetIso,
-    };
-
-    // Worst window for classic mode
-    const isWindowWorse = windowPercentRemaining <= weeklyPercentRemaining;
-    const worst = isWindowWorse ? windowQuota : weeklyQuota;
+    if (!Number.isFinite(creditsUsd)) {
+      return { success: false, error: "Firmware API response missing credits" };
+    }
 
     return {
       success: true,
-      percentRemaining: worst.percentRemaining,
-      resetTimeIso: worst.resetTimeIso,
-      windows: {
-        window: windowQuota,
-        weekly: weeklyQuota,
-      },
-      windowResetsRemaining,
+      creditsUsd,
+      resetTimeIso,
     };
   } catch (err) {
     return {
@@ -161,61 +108,14 @@ export async function queryFirmwareQuota(): Promise<FirmwareResult> {
 }
 
 /**
- * Manually reset the 5-hour spending window.
- * Consumes one of the 2 weekly resets available.
+ * Deprecated: Firmware no longer documents a reset-window endpoint.
  */
 export async function resetFirmwareQuotaWindow(): Promise<FirmwareResetWindowResult> {
   const auth = await readFirmwareAuth();
   if (!auth) return null;
 
-  try {
-    const resp = await fetchWithTimeout(FIRMWARE_RESET_WINDOW_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${auth.key}`,
-        "User-Agent": "OpenCode-Quota-Toast/1.0",
-      },
-    });
-
-    if (!resp.ok) {
-      const text = await resp.text();
-      // Try to parse error JSON for better message
-      try {
-        const errorData = JSON.parse(text) as {
-          success?: boolean;
-          error?: string;
-          message?: string;
-        };
-        if (errorData.message) {
-          return {
-            success: false,
-            error: sanitizeErrorText(errorData.message),
-          };
-        }
-      } catch {
-        // Not JSON, use raw text
-      }
-      return {
-        success: false,
-        error: `Firmware API error ${resp.status}: ${sanitizeErrorText(text.slice(0, 120))}`,
-      };
-    }
-
-    // Parse success response
-    const data = (await resp.json()) as {
-      success?: boolean;
-      windowResetsRemaining?: number;
-    };
-
-    return {
-      success: true,
-      windowResetsRemaining:
-        typeof data.windowResetsRemaining === "number" ? data.windowResetsRemaining : undefined,
-    };
-  } catch (err) {
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
+  return {
+    success: false,
+    error: "Deprecated: Firmware reset-window is no longer supported by the API.",
+  };
 }
