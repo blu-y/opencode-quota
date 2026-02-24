@@ -177,6 +177,12 @@ export interface AuthData {
     type: string;
     key?: string;
   };
+  "opencode-qwencode-auth"?: {
+    type: string;
+    access?: string;
+    refresh?: string;
+    expires?: number;
+  };
 }
 
 // =============================================================================
