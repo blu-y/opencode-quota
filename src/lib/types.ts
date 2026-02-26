@@ -183,6 +183,10 @@ export interface AuthData {
     refresh?: string;
     expires?: number;
   };
+  "zai-coding-plan"?: {
+    type: "api";
+    key: string;
+  };
 }
 
 // =============================================================================
@@ -270,6 +274,54 @@ export interface CopilotUsageResponse {
 }
 
 // =============================================================================
+// Z.ai Types
+// =============================================================================
+
+/** Z.ai auth entry in auth.json */
+export interface ZaiAuthData {
+  type: "api";
+  key: string;
+}
+
+/** Z.ai quota limit entry from API */
+export interface ZaiQuotaLimit {
+  type: string;
+  unit: number;
+  number: number;
+  usage: number;
+  currentValue?: number;
+  remaining?: number;
+  percentage: number;
+  nextResetTime?: number;
+  usageDetails?: Array<{
+    modelCode: string;
+    usage: number;
+  }>;
+}
+
+/** Z.ai API response */
+export interface ZaiQuotaResponse {
+  code: number;
+  msg: string;
+  data: {
+    limits: ZaiQuotaLimit[];
+    level: string;
+  };
+  success: boolean;
+}
+
+/** Result from fetching Z.ai quota */
+export interface ZaiQuotaResult {
+  success: true;
+  label: string;
+  windows: {
+    hourly?: { percentRemaining: number; resetTimeIso?: string };
+    weekly?: { percentRemaining: number; resetTimeIso?: string };
+    mcp?: { percentRemaining: number; resetTimeIso?: string };
+  };
+}
+
+// =============================================================================
 // Quota Result Types
 // =============================================================================
 
@@ -313,6 +365,7 @@ export interface QuotaError {
 /** Combined quota result */
 export type CopilotResult = CopilotQuotaResult | QuotaError | null;
 export type GoogleResult = GoogleQuotaResult | QuotaError | null;
+export type ZaiResult = ZaiQuotaResult | QuotaError | null;
 export type ChutesResult =
   | {
       success: true;

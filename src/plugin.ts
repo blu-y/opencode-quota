@@ -277,6 +277,8 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
         return "Chutes";
       case "qwen-code":
         return "Qwen";
+      case "zai":
+        return "Z.ai";
       default:
         return id;
     }

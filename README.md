@@ -46,18 +46,18 @@ That's it. Providers are auto-detected based on your OpenCode configuration. Toa
 
 ## Commands
 
-| Command                  | Description                                               |
-| ------------------------ | --------------------------------------------------------- |
-| `/quota`                 | Show quota toast (verbose)                                |
-| `/quota_status`          | Show diagnostics (config, providers, accounts) + pricing health |
-|                          |                                                           |
-| `/tokens_today`          | Tokens used today (calendar day)                          |
-| `/tokens_daily`          | Tokens used in last 24 hours                              |
-| `/tokens_weekly`         | Tokens used in last 7 days                                |
-| `/tokens_monthly`        | Tokens used in last 30 days (incl. pricing sections)       |
-| `/tokens_all`            | Tokens used all time                                      |
-| `/tokens_session`        | Tokens used in current session                            |
-| `/tokens_between`        | Tokens between two dates (YYYY-MM-DD)                     |
+| Command           | Description                                                     |
+| ----------------- | --------------------------------------------------------------- |
+| `/quota`          | Show quota toast (verbose)                                      |
+| `/quota_status`   | Show diagnostics (config, providers, accounts) + pricing health |
+|                   |                                                                 |
+| `/tokens_today`   | Tokens used today (calendar day)                                |
+| `/tokens_daily`   | Tokens used in last 24 hours                                    |
+| `/tokens_weekly`  | Tokens used in last 7 days                                      |
+| `/tokens_monthly` | Tokens used in last 30 days (incl. pricing sections)            |
+| `/tokens_all`     | Tokens used all time                                            |
+| `/tokens_session` | Tokens used in current session                                  |
+| `/tokens_between` | Tokens between two dates (YYYY-MM-DD)                           |
 
 ## Supported Providers
 
@@ -69,6 +69,7 @@ That's it. Providers are auto-detected based on your OpenCode configuration. Toa
 | Firmware AI        | `firmware`           | OpenCode auth or API key                      |
 | Chutes AI          | `chutes`             | OpenCode auth or API key                      |
 | Google Antigravity | `google-antigravity` | Multi-account via `opencode-antigravity-auth` |
+| Z.ai               | `zai`                | OpenCode auth (automatic)                     |
 
 ### Provider-Specific Setup
 
@@ -150,8 +151,6 @@ Works automatically if OpenCode has Firmware configured. Alternatively, provide 
 
 The `apiKey` field supports `{env:VAR_NAME}` syntax or a direct key.
 
-
-
 </details>
 
 <details>
@@ -195,29 +194,36 @@ If you are troubleshooting, `/quota_status` prints the candidate paths checked f
 
 </details>
 
+<details>
+<summary><strong>Z.ai (Coding Plan)</strong></summary>
+
+Works automatically if OpenCode has Z.ai (Coding Plan) configured.
+
+</details>
+
 ## Configuration Reference
 
 All options go under `experimental.quotaToast` in `opencode.json` or `opencode.jsonc`:
 
-| Option              | Default      | Description                                                                  |
-| ------------------- | ------------ | ---------------------------------------------------------------------------- |
-| `enabled`           | `true`       | Enable/disable plugin                                                        |
-| `enableToast`       | `true`       | Show popup toasts                                                            |
-| `toastStyle`        | `classic`    | Toast layout style: `classic` or `grouped`                                   |
-| `enabledProviders`  | `"auto"`     | Provider IDs to query, or `"auto"` to detect                                 |
+| Option              | Default      | Description                                                                                          |
+| ------------------- | ------------ | ---------------------------------------------------------------------------------------------------- |
+| `enabled`           | `true`       | Enable/disable plugin                                                                                |
+| `enableToast`       | `true`       | Show popup toasts                                                                                    |
+| `toastStyle`        | `classic`    | Toast layout style: `classic` or `grouped`                                                           |
+| `enabledProviders`  | `"auto"`     | Provider IDs to query, or `"auto"` to detect                                                         |
 | `minIntervalMs`     | `300000`     | Minimum ms between provider fetches (default: 5 min); Qwen local RPM stays live on question triggers |
-| `toastDurationMs`   | `9000`       | How long toasts display (ms)                                                 |
-| `showOnIdle`        | `true`       | Show toast on idle trigger                                                   |
-| `showOnQuestion`    | `true`       | Show toast after a question/assistant response                               |
-| `showOnCompact`     | `true`       | Show toast after session compaction                                          |
-| `showOnBothFail`    | `true`       | If providers attempt and fail, show a fallback toast                         |
-| `onlyCurrentModel`  | `false`      | Only show quota for the current model (best-effort)                          |
-| `showSessionTokens` | `true`       | Show per-model input/output tokens in toast                                  |
-| `layout.maxWidth`   | `50`         | Formatting target width                                                      |
-| `layout.narrowAt`   | `42`         | Compact layout breakpoint                                                    |
-| `layout.tinyAt`     | `32`         | Ultra-compact layout breakpoint                                              |
-| `googleModels`      | `["CLAUDE"]` | Google models: `CLAUDE`, `G3PRO`, `G3FLASH`, `G3IMAGE`                       |
-| `debug`             | `false`      | Show debug info in toasts (and a debug-only toast when otherwise suppressed) |
+| `toastDurationMs`   | `9000`       | How long toasts display (ms)                                                                         |
+| `showOnIdle`        | `true`       | Show toast on idle trigger                                                                           |
+| `showOnQuestion`    | `true`       | Show toast after a question/assistant response                                                       |
+| `showOnCompact`     | `true`       | Show toast after session compaction                                                                  |
+| `showOnBothFail`    | `true`       | If providers attempt and fail, show a fallback toast                                                 |
+| `onlyCurrentModel`  | `false`      | Only show quota for the current model (best-effort)                                                  |
+| `showSessionTokens` | `true`       | Show per-model input/output tokens in toast                                                          |
+| `layout.maxWidth`   | `50`         | Formatting target width                                                                              |
+| `layout.narrowAt`   | `42`         | Compact layout breakpoint                                                                            |
+| `layout.tinyAt`     | `32`         | Ultra-compact layout breakpoint                                                                      |
+| `googleModels`      | `["CLAUDE"]` | Google models: `CLAUDE`, `G3PRO`, `G3FLASH`, `G3IMAGE`                                               |
+| `debug`             | `false`      | Show debug info in toasts (and a debug-only toast when otherwise suppressed)                         |
 
 ## Troubleshooting
 
