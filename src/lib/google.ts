@@ -313,9 +313,13 @@ function extractModelQuotas(
 
     let modelInfo = data.models[modelConfig.key];
 
-    // Try alternate key if primary not found
+    // Try alternate keys (pipe-separated) if primary not found
     if (!modelInfo && modelConfig.altKey) {
-      modelInfo = data.models[modelConfig.altKey];
+      const altKeys = modelConfig.altKey.split("|");
+      for (const altKey of altKeys) {
+        modelInfo = data.models[altKey.trim()];
+        if (modelInfo) break;
+      }
     }
 
     if (modelInfo) {

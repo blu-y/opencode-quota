@@ -340,8 +340,8 @@ export const GOOGLE_MODEL_KEYS: Record<
   GoogleModelId,
   { key: string; altKey?: string; display: string }
 > = {
-  G3PRO: { key: "gemini-3-pro-high", altKey: "gemini-3-pro-low", display: "G3Pro" },
+  G3PRO: { key: "gemini-3.1-pro", altKey: "gemini-3.1-pro-high|gemini-3.1-pro-low|gemini-3-pro-high|gemini-3-pro-low", display: "G3Pro" },
   G3FLASH: { key: "gemini-3-flash", display: "G3Flash" },
-  CLAUDE: { key: "claude-opus-4-5-thinking", altKey: "claude-opus-4-5", display: "Claude" },
+  CLAUDE: { key: "claude-opus-4-6-thinking", altKey: "claude-opus-4-5-thinking|claude-opus-4-5", display: "Claude" },
   G3IMAGE: { key: "gemini-3-pro-image", display: "G3Image" },
 };
